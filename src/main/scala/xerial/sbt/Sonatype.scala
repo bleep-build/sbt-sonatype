@@ -7,451 +7,256 @@
 
 package xerial.sbt
 
-import sbt.Keys._
-import sbt._
-import sbt.librarymanagement.MavenRepository
+import bleep.logging.Logger
+import sbt.librarymanagement.{MavenRepository, Resolver}
 import wvlet.log.{LogLevel, LogSupport}
 import xerial.sbt.sonatype.SonatypeClient.StagingRepositoryProfile
 import xerial.sbt.sonatype.SonatypeService._
-import xerial.sbt.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
+import xerial.sbt.sonatype.{Credentials, SonatypeClient, SonatypeService}
 
+import java.io.File
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.hashing.MurmurHash3
 
-/** Plugin for automating release processes at Sonatype Nexus
-  */
-object Sonatype extends AutoPlugin with LogSupport {
-  wvlet.log.Logger.init
+abstract class Sonatype(
+    logger: Logger,
+    sonatypeBundleDirectory: File,
+    organization: String,
+    bundleName: String,
+    version: String
+)(implicit ec: ExecutionContext = ExecutionContext.global) {
+  /* Sonatype repository URL: e.g. https://oss.sonatype.org/service/local */
+  lazy val sonatypeRepository: String = s"https://$sonatypeCredentialHost/service/local"
+  /* Profile name at Sonatype: e.g. org.xerial */
+  lazy val sonatypeProfileName: String = organization
+  /* Credential host. Default is oss.sonatype.org */
+  lazy val sonatypeCredentialHost: String = Sonatype.sonatypeLegacy
 
-  trait SonatypeKeys {
-    val sonatypeRepository  = settingKey[String]("Sonatype repository URL: e.g. https://oss.sonatype.org/service/local")
-    val sonatypeProfileName = settingKey[String]("Profile name at Sonatype: e.g. org.xerial")
-    val sonatypeCredentialHost          = settingKey[String]("Credential host. Default is oss.sonatype.org")
-    val sonatypeDefaultResolver         = settingKey[Resolver]("Default Sonatype Resolver")
-    val sonatypePublishTo               = settingKey[Option[Resolver]]("Default Sonatype publishTo target")
-    val sonatypePublishToBundle         = settingKey[Option[Resolver]]("Default Sonatype publishTo target")
-    val sonatypeTargetRepositoryProfile = settingKey[StagingRepositoryProfile]("Stating repository profile")
-    val sonatypeProjectHosting =
-      settingKey[Option[ProjectHosting]]("Shortcut to fill in required Maven Central information")
-    val sonatypeSessionName      = settingKey[String]("Used for identifying a sonatype staging repository")
-    val sonatypeTimeoutMillis    = settingKey[Int]("milliseconds before giving up Sonatype API requests")
-    val sonatypeBundleClean      = taskKey[Unit]("Clean up the local bundle folder")
-    val sonatypeBundleDirectory  = settingKey[File]("Directory to create a bundle")
-    val sonatypeBundleRelease    = taskKey[String]("Release a bundle to Sonatype")
-    val sonatypeLogLevel         = settingKey[String]("log level: trace, debug, info warn, error")
-    val sonatypeSnapshotResolver = settingKey[Resolver]("Sonatype snapshot resolver")
-    val sonatypeStagingResolver  = settingKey[Resolver]("Sonatype staging resolver")
-  }
-
-  object SonatypeKeys extends SonatypeKeys {}
-
-  object autoImport extends SonatypeKeys {}
-
-  override def trigger         = allRequirements
-  override def projectSettings = sonatypeSettings
-  override def buildSettings   = sonatypeBuildSettings
-
-  import autoImport._
-  import complete.DefaultParsers._
-
-  private implicit val ec = ExecutionContext.global
-
-  val sonatypeLegacy = "oss.sonatype.org"
-  val sonatype01     = "s01.oss.sonatype.org"
-
-  lazy val sonatypeBuildSettings = Seq[Def.Setting[_]](
-    sonatypeCredentialHost := sonatypeLegacy
-  )
-  lazy val sonatypeSettings = Seq[Def.Setting[_]](
-    sonatypeProfileName    := organization.value,
-    sonatypeRepository     := s"https://${sonatypeCredentialHost.value}/service/local",
-    sonatypeProjectHosting := None,
-    publishMavenStyle      := true,
-    pomIncludeRepository := { _ =>
-      false
-    },
-    credentials ++= {
-      val alreadyContainsSonatypeCredentials: Boolean = credentials.value.exists {
-        case d: DirectCredentials => d.host == sonatypeCredentialHost.value
-        case _                    => false
-      }
-      if (!alreadyContainsSonatypeCredentials) {
-        val env = sys.env.get(_)
-        (for {
-          username <- env("SONATYPE_USERNAME")
-          password <- env("SONATYPE_PASSWORD")
-        } yield Credentials(
-          "Sonatype Nexus Repository Manager",
-          sonatypeCredentialHost.value,
-          username,
-          password
-        )).toSeq
-      } else Seq.empty
-    },
-    homepage := homepage.value.orElse(sonatypeProjectHosting.value.map(h => url(h.homepage))),
-    scmInfo  := sonatypeProjectHosting.value.map(_.scmInfo).orElse(scmInfo.value),
-    developers := {
-      val derived = sonatypeProjectHosting.value.map(h => List(h.developer)).getOrElse(List.empty)
-      if (developers.value.isEmpty) derived
-      else developers.value
-    },
-    sonatypePublishTo := Some(sonatypeDefaultResolver.value),
-    sonatypeBundleDirectory := {
-      (ThisBuild / baseDirectory).value / "target" / "sonatype-staging" / s"${(ThisBuild / version).value}"
-    },
-    sonatypeBundleClean := {
-      IO.delete(sonatypeBundleDirectory.value)
-    },
-    sonatypePublishToBundle := {
-      if (version.value.endsWith("-SNAPSHOT")) {
-        // Sonatype snapshot repositories have no support for bundle upload,
-        // so use direct publishing to the snapshot repo.
-        Some(sonatypeSnapshotResolver.value)
-      } else {
-        Some(Resolver.file("sonatype-local-bundle", sonatypeBundleDirectory.value))
-      }
-    },
-    sonatypeSnapshotResolver := {
-      MavenRepository(
-        s"${sonatypeCredentialHost.value.replace('.', '-')}-snapshots",
-        s"https://${sonatypeCredentialHost.value}/content/repositories/snapshots"
-      )
-    },
-    sonatypeStagingResolver := {
-      MavenRepository(
-        s"${sonatypeCredentialHost.value.replace('.', '-')}-staging",
-        s"https://${sonatypeCredentialHost.value}/service/local/staging/deploy/maven2"
-      )
-    },
-    sonatypeDefaultResolver := {
-      val profileM   = sonatypeTargetRepositoryProfile.?.value
-      val repository = sonatypeRepository.value
-      val staged = profileM.map { stagingRepoProfile =>
-        s"${sonatypeCredentialHost.value.replace('.', '-')}-releases" at s"${repository}/${stagingRepoProfile.deployPath}"
-      }
-      staged.getOrElse(if (version.value.endsWith("-SNAPSHOT")) {
-        sonatypeSnapshotResolver.value
-      } else {
-        sonatypeStagingResolver.value
-      })
-    },
-    sonatypeTimeoutMillis := 60 * 60 * 1000, // 60 minutes
-    sonatypeSessionName   := s"[sbt-sonatype] ${name.value} ${version.value}",
-    sonatypeLogLevel      := "info",
-    commands ++= Seq(
-      sonatypeBundleRelease,
-      sonatypeBundleUpload,
-      sonatypePrepare,
-      sonatypeOpen,
-      sonatypeClose,
-      sonatypePromote,
-      sonatypeDrop,
-      sonatypeRelease,
-      sonatypeClean,
-      sonatypeReleaseAll,
-      sonatypeDropAll,
-      sonatypeLog,
-      sonatypeStagingRepositoryProfiles,
-      sonatypeStagingProfiles
+  lazy val credential: Option[Credentials] =
+    for {
+      username <- sys.env.get("SONATYPE_USERNAME")
+      password <- sys.env.get("SONATYPE_PASSWORD")
+    } yield Credentials(
+      "Sonatype Nexus Repository Manager",
+      sonatypeCredentialHost,
+      username,
+      password
     )
-  )
 
-  private def prepare(state: State, rest: SonatypeService): StagingRepositoryProfile = {
-    val extracted      = Project.extract(state)
-    val descriptionKey = extracted.get(sonatypeSessionName)
-    state.log.info(s"Preparing a new staging repository for ${descriptionKey}")
+  /* Default Sonatype publishTo target */
+  lazy val sonatypePublishToBundle: Resolver =
+    // Sonatype snapshot repositories have no support for bundle upload,
+    // so use direct publishing to the snapshot repo.
+    if (version.endsWith("-SNAPSHOT")) sonatypeSnapshotResolver
+    else Resolver.file("sonatype-local-bundle", sonatypeBundleDirectory)
+
+  /* Sonatype snapshot resolver */
+  lazy val sonatypeSnapshotResolver =
+    MavenRepository(
+      s"${sonatypeCredentialHost.replace('.', '-')}-snapshots",
+      s"https://$sonatypeCredentialHost/content/repositories/snapshots"
+    )
+
+  /* Sonatype staging resolver */
+  lazy val sonatypeStagingResolver =
+    MavenRepository(
+      s"${sonatypeCredentialHost.replace('.', '-')}-staging",
+      s"https://$sonatypeCredentialHost/service/local/staging/deploy/maven2"
+    )
+
+  /* milliseconds before giving up Sonatype API requests */
+  lazy val sonatypeTimeoutMillis = 60 * 60 * 1000 // 60 minutes
+
+  /* Used for identifying a sonatype staging repository */
+  lazy val sonatypeSessionName = s"[sbt-sonatype] $bundleName $version"
+
+  /* log level: trace, debug, info warn, error */
+  lazy val sonatypeLogLevel = "info"
+
+  private def prepare(rest: SonatypeService): StagingRepositoryProfile = {
+    logger.info(s"Preparing a new staging repository for $sonatypeSessionName")
     // Drop a previous staging repository if exists
-    val dropTask = Future.apply(rest.dropIfExistsByKey(descriptionKey))
+    val dropTask = Future.apply(rest.dropIfExistsByKey(sonatypeSessionName))
     // Create a new one
-    val createTask = Future.apply(rest.createStage(descriptionKey))
+    val createTask = Future.apply(rest.createStage(sonatypeSessionName))
     // Run two tasks in parallel
-    val merged                     = dropTask.zip(createTask)
-    val (droppedRepo, createdRepo) = Await.result(merged, Duration.Inf)
+    val merged = dropTask.zip(createTask)
+    val (droppedRepo @ _, createdRepo) = Await.result(merged, Duration.Inf)
     createdRepo
   }
 
-  private val sonatypeBundleRelease =
-    newCommand("sonatypeBundleRelease", "Upload a bundle in sonatypeBundleDirectory and release it at Sonatype") {
-      state: State =>
-        withSonatypeService(state) { rest =>
-          val repo       = prepare(state, rest)
-          val extracted  = Project.extract(state)
-          val bundlePath = extracted.get(sonatypeBundleDirectory)
-          rest.uploadBundle(bundlePath, repo.deployPath)
-          rest.closeAndPromote(repo)
-          updatePublishSettings(state, repo)
-        }
-    }
-
-  private val sonatypeBundleUpload = newCommand("sonatypeBundleUpload", "Upload a bundle in sonatypeBundleDirectory") {
-    state: State =>
-      val extracted  = Project.extract(state)
-      val bundlePath = extracted.get(sonatypeBundleDirectory)
-      withSonatypeService(state) { rest =>
-        val repo = extracted.getOpt(sonatypeTargetRepositoryProfile).getOrElse {
-          val descriptionKey = extracted.get(sonatypeSessionName)
-          rest.openOrCreateByKey(descriptionKey)
-        }
-        rest.uploadBundle(bundlePath, repo.deployPath)
-        updatePublishSettings(state, repo)
-      }
-  }
-
-  private val sonatypePrepare = newCommand(
-    "sonatypePrepare",
-    "Clean (if exists) and create a staging repository for releasing the current version, then update publishTo"
-  ) { state: State =>
-    withSonatypeService(state) { rest =>
-      val repo = prepare(state, rest)
-      updatePublishSettings(state, repo)
-    }
-  }
-
-  private val sonatypeOpen = newCommand(
-    "sonatypeOpen",
-    "Open (or create if not exists) to a staging repository for the current version, then update publishTo"
-  ) { state: State =>
-    withSonatypeService(state) { rest =>
-      // Re-open or create a staging repository
-      val descriptionKey = Project.extract(state).get(sonatypeSessionName)
-      val repo           = rest.openOrCreateByKey(descriptionKey)
-      updatePublishSettings(state, repo)
-    }
-  }
-
-  private def updatePublishSettings(state: State, repo: StagingRepositoryProfile): State = {
-    val extracted = Project.extract(state)
-    // accumulate changes for settings for current project and all aggregates
-    state.log.info(s"Updating sonatypePublishTo settings...")
-    val newSettings: Seq[Def.Setting[_]] = extracted.currentProject.referenced.flatMap { ref =>
-      Seq(
-        ref / sonatypeTargetRepositoryProfile := repo
-      )
-    } ++ Seq(
-      sonatypeTargetRepositoryProfile := repo
-    )
-
-    val next = extracted.appendWithoutSession(newSettings, state)
-    next
-  }
-
-  private val sonatypeClose = commandWithRepositoryId("sonatypeClose", "") { (state: State, arg: Option[String]) =>
-    val extracted = Project.extract(state)
-    val repoID    = arg.orElse(extracted.getOpt(sonatypeTargetRepositoryProfile).map(_.repositoryId))
-    withSonatypeService(state) { rest =>
-      val repo1 = rest.findTargetRepository(Close, repoID)
-      val repo2 = rest.closeStage(repo1)
-      extracted.appendWithoutSession(Seq(sonatypeTargetRepositoryProfile := repo2), state)
-    }
-  }
-
-  private val sonatypePromote = commandWithRepositoryId("sonatypePromote", "Promote a staging repository") {
-    (state: State, arg: Option[String]) =>
-      val extracted = Project.extract(state)
-      val repoID    = arg.orElse(extracted.getOpt(sonatypeTargetRepositoryProfile).map(_.repositoryId))
-      withSonatypeService(state) { rest =>
-        val repo1 = rest.findTargetRepository(Promote, repoID)
-        val repo2 = rest.promoteStage(repo1)
-        extracted.appendWithoutSession(Seq(sonatypeTargetRepositoryProfile := repo2), state)
-      }
-  }
-
-  private val sonatypeDrop = commandWithRepositoryId("sonatypeDrop", "Drop a staging repository") {
-    (state: State, arg: Option[String]) =>
-      val extracted = Project.extract(state)
-      val repoID    = arg.orElse(extracted.getOpt(sonatypeTargetRepositoryProfile).map(_.repositoryId))
-      withSonatypeService(state) { rest =>
-        val repo1 = rest.findTargetRepository(Drop, repoID)
-        val repo2 = rest.dropStage(repo1)
-        extracted.appendWithoutSession(Seq(sonatypeTargetRepositoryProfile := repo2), state)
-      }
-  }
-
-  private val sonatypeRelease =
-    commandWithRepositoryId("sonatypeRelease", "Publish with sonatypeClose and sonatypePromote") {
-      (state: State, arg: Option[String]) =>
-        val extracted = Project.extract(state)
-        val repoID    = arg.orElse(extracted.getOpt(sonatypeTargetRepositoryProfile).map(_.repositoryId))
-        withSonatypeService(state) { rest =>
-          val repo1 = rest.findTargetRepository(CloseAndPromote, repoID)
-          val repo2 = rest.closeAndPromote(repo1)
-          extracted.appendWithoutSession(Seq(sonatypeTargetRepositoryProfile := repo2), state)
-        }
-    }
-
-  private val sonatypeClean =
-    newCommand("sonatypeClean", "Clean a staging repository for the current version if it exists") { state: State =>
-      val extracted = Project.extract(state)
-      withSonatypeService(state) { rest =>
-        val descriptionKey = extracted.get(sonatypeSessionName)
-        rest.dropIfExistsByKey(descriptionKey)
-        state
-      }
-    }
-
-  private val sonatypeReleaseAll =
-    commandWithRepositoryId("sonatypeReleaseAll", "Publish all staging repositories to Maven central") {
-      (state: State, arg: Option[String]) =>
-        withSonatypeService(state, arg) { rest =>
-          val tasks = rest.stagingRepositoryProfiles().map { repo =>
-            Future.apply(rest.closeAndPromote(repo))
-          }
-          val merged = Future.sequence(tasks)
-          Await.result(merged, Duration.Inf)
-          state
-        }
-    }
-
-  private val sonatypeDropAll = commandWithRepositoryId("sonatypeDropAll", "Drop all staging repositories") {
-    (state: State, arg: Option[String]) =>
-      withSonatypeService(state, arg) { rest =>
-        val dropTasks = rest.stagingRepositoryProfiles().map { repo =>
-          Future.apply(rest.dropStage(repo))
-        }
-        val merged = Future.sequence(dropTasks)
-        Await.result(merged, Duration.Inf)
-        state
-      }
-  }
-
-  private val sonatypeLog = newCommand("sonatypeLog", "Show staging activity logs at Sonatype") { state: State =>
-    withSonatypeService(state) { rest =>
-      val alist = rest.activities
-      if (alist.isEmpty)
-        warn("No staging log is found")
-      for ((repo, activities) <- alist) {
-        info(s"Staging activities of $repo:")
-        for (a <- activities) {
-          a.showProgress
-        }
-      }
-      state
-    }
-  }
-
-  private val sonatypeStagingRepositoryProfiles =
-    newCommand("sonatypeStagingRepositoryProfiles", "Show the list of staging repository profiles") { state: State =>
-      withSonatypeService(state) { rest =>
-        val repos = rest.stagingRepositoryProfiles()
-        if (repos.isEmpty)
-          warn(s"No staging repository is found for ${rest.profileName}")
-        else {
-          info(s"Staging repository profiles (sonatypeProfileName:${rest.profileName}):")
-          info(repos.mkString("\n"))
-        }
-        state
-      }
-    }
-
-  private val sonatypeStagingProfiles = newCommand("sonatypeStagingProfiles", "Show the list of staging profiles") {
-    state: State =>
-      withSonatypeService(state) { rest =>
-        val profiles = rest.stagingProfiles
-        if (profiles.isEmpty)
-          warn(s"No staging profile is found for ${rest.profileName}")
-        else {
-          info(s"Staging profiles (sonatypeProfileName:${rest.profileName}):")
-          info(profiles.mkString("\n"))
-        }
-        state
-      }
-  }
-
-  case class ProjectHosting(
-      domain: String,
-      user: String,
-      fullName: Option[String],
-      email: String,
-      repository: String
-  ) {
-    def homepage  = s"https://$domain/$user/$repository"
-    def scmUrl    = s"git@$domain:$user/$repository.git"
-    def scmInfo   = ScmInfo(url(homepage), scmUrl)
-    def developer = Developer(user, fullName.getOrElse(user), email, url(s"https://$domain/$user"))
-  }
-
-  object GitHubHosting {
-    private val domain                                         = "github.com"
-    def apply(user: String, repository: String, email: String) = ProjectHosting(domain, user, None, email, repository)
-    def apply(user: String, repository: String, fullName: String, email: String) =
-      ProjectHosting(domain, user, Some(fullName), email, repository)
-  }
-
-  object GitLabHosting {
-    private val domain                                         = "gitlab.com"
-    def apply(user: String, repository: String, email: String) = ProjectHosting(domain, user, None, email, repository)
-    def apply(user: String, repository: String, fullName: String, email: String) =
-      ProjectHosting(domain, user, Some(fullName), email, repository)
-  }
-
-  // aliases
-  @deprecated("Use GitHubHosting (capital H) instead", "2.2")
-  val GithubHosting = GitHubHosting
-  @deprecated("Use GitLabHosting (capital L) instead", "2.2")
-  val GitlabHosting = GitLabHosting
-
-  private val repositoryIdParser: complete.Parser[Option[String]] =
-    (Space ~> token(StringBasic, "(sonatype staging repository id)")).?.!!!(
-      "invalid input. please input a repository id"
-    )
-
-  private val sonatypeProfileParser: complete.Parser[Option[String]] =
-    (Space ~> token(StringBasic, "(sonatypeProfileName)")).?.!!!(
-      "invalid input. please input sonatypeProfileName (e.g., org.xerial)"
-    )
-
-  private def getCredentials(extracted: Extracted, state: State) = {
-    val (nextState, credential) = extracted.runTask(credentials, state)
-    credential
-  }
-
-  private def withSonatypeService(state: State, profileName: Option[String] = None)(
-      body: SonatypeService => State
-  ): State = {
-    val extracted = Project.extract(state)
-    val logLevel  = LogLevel(extracted.get(sonatypeLogLevel))
+  def withSonatypeService[T](body: SonatypeService => T): T = {
+    val logLevel = LogLevel(sonatypeLogLevel)
     wvlet.log.Logger.setDefaultLogLevel(logLevel)
 
-    val repositoryUrl  = extracted.get(sonatypeRepository)
-    val creds          = getCredentials(extracted, state)
-    val credentialHost = extracted.get(sonatypeCredentialHost)
+    val repositoryUrl = sonatypeRepository
+    val credentialHost = sonatypeCredentialHost
 
     val hashsum: String = {
-      val input = Vector(repositoryUrl, creds.toString(), credentialHost).mkString("-")
-      MurmurHash3.stringHash(input).abs.toString()
+      val input = Vector(repositoryUrl, credential.toString, credentialHost).mkString("-")
+      MurmurHash3.stringHash(input).abs.toString
     }
 
     val sonatypeClient = new SonatypeClient(
       repositoryUrl = repositoryUrl,
-      cred = creds,
+      cred = credential.toList,
       credentialHost = credentialHost,
-      timeoutMillis = extracted.get(sonatypeTimeoutMillis)
+      timeoutMillis = sonatypeTimeoutMillis
     )
     val service = new SonatypeService(
       sonatypeClient,
-      profileName.getOrElse(extracted.get(sonatypeProfileName)),
+      sonatypeProfileName,
       Some(hashsum)
     )
-    try {
-      body(service)
-    } catch {
-      case e: SonatypeException =>
-        error(e.toString)
-        state.fail
-      case e: Throwable =>
-        error(e)
-        state.fail
-    } finally {
-      service.close()
+    try body(service)
+    finally service.close()
+  }
+
+  /* Upload a bundle in sonatypeBundleDirectory and release it at Sonatype */
+  def sonatypeBundleRelease(): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repo = prepare(rest)
+      rest.uploadBundle(sonatypeBundleDirectory, repo.deployPath)
+      rest.closeAndPromote(repo)
+      repo
     }
-  }
 
-  private def newCommand(name: String, briefHelp: String)(body: State => State) = {
-    Command.command(name, briefHelp, briefHelp)(body)
-  }
+  /* Upload a bundle in sonatypeBundleDirectory */
+  def sonatypeBundleUpload(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repo = sonatypeTargetRepositoryProfile.getOrElse {
+        rest.openOrCreateByKey(sonatypeSessionName)
+      }
+      rest.uploadBundle(sonatypeBundleDirectory, repo.deployPath)
+      repo
+    }
 
-  private def commandWithRepositoryId(name: String, briefHelp: String) =
-    Command(name, (name, briefHelp), briefHelp)(_ => repositoryIdParser)(_)
+  /* Clean (if exists) and create a staging repository for releasing the current version, then update publishTo */
+  def sonatypePrepare(): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      prepare(rest)
+    }
 
+  /* Open (or create if not exists) to a staging repository for the current version, then update publishTo */
+  def sonatypeOpen(): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      // Re-open or create a staging repository
+      val repo = rest.openOrCreateByKey(sonatypeSessionName)
+      repo
+    }
+
+  def sonatypeClose(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+      val repo1 = rest.findTargetRepository(Close, repoID)
+      val repo2 = rest.closeStage(repo1)
+      repo2
+    }
+
+  /* Promote a staging repository */
+  def sonatypePromote(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+      val repo1 = rest.findTargetRepository(Promote, repoID)
+      val repo2 = rest.promoteStage(repo1)
+      repo2
+    }
+
+  /* Drop a staging repository */
+  def sonatypeDrop(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+      val repo1 = rest.findTargetRepository(Drop, repoID)
+      val repo2 = rest.dropStage(repo1)
+      repo2
+    }
+
+  /* Publish with sonatypeClose and sonatypePromote */
+  def sonatypeRelease(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
+    withSonatypeService { rest =>
+      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+      val repo1 = rest.findTargetRepository(CloseAndPromote, repoID)
+      val repo2 = rest.closeAndPromote(repo1)
+      repo2
+    }
+
+  /* Clean a staging repository for the current version if it exists */
+  def sonatypeClean(): Unit =
+    withSonatypeService { rest =>
+      val descriptionKey = sonatypeSessionName
+      rest.dropIfExistsByKey(descriptionKey)
+      ()
+    }
+
+  /* Publish all staging repositories to Maven central */
+  def sonatypeReleaseAll(): Unit =
+    withSonatypeService { rest =>
+      val tasks = rest.stagingRepositoryProfiles().map { repo =>
+        Future.apply(rest.closeAndPromote(repo))
+      }
+      val merged = Future.sequence(tasks)
+      Await.result(merged, Duration.Inf)
+      ()
+    }
+
+  /* Drop all staging repositories */
+  def sonatypeDropAll(): Unit =
+    withSonatypeService { rest =>
+      val dropTasks = rest.stagingRepositoryProfiles().map { repo =>
+        Future.apply(rest.dropStage(repo))
+      }
+      val merged = Future.sequence(dropTasks)
+      Await.result(merged, Duration.Inf)
+      ()
+    }
+
+  /* Show staging activity logs at Sonatype */
+  def sonatypeLog(): Unit =
+    withSonatypeService { rest =>
+      val alist = rest.activities
+      if (alist.isEmpty)
+        logger.warn("No staging log is found")
+      for ((repo, activities) <- alist) {
+        logger.info(s"Staging activities of $repo:")
+        for (a <- activities)
+          a.showProgress
+      }
+      ()
+    }
+
+  /* Show the list of staging repository profiles */
+  def sonatypeStagingRepositoryProfiles(): Unit =
+    withSonatypeService { rest =>
+      val repos = rest.stagingRepositoryProfiles()
+      if (repos.isEmpty)
+        logger.warn(s"No staging repository is found for ${rest.profileName}")
+      else {
+        logger.info(s"Staging repository profiles (sonatypeProfileName:${rest.profileName}):")
+        logger.info(repos.mkString("\n"))
+      }
+    }
+
+  /* Show the list of staging profiles */
+  def sonatypeStagingProfiles(): Unit =
+    withSonatypeService { rest =>
+      val profiles = rest.stagingProfiles
+      if (profiles.isEmpty)
+        logger.warn(s"No staging profile is found for ${rest.profileName}")
+      else {
+        logger.info(s"Staging profiles (sonatypeProfileName:${rest.profileName}):")
+        logger.info(profiles.mkString("\n"))
+      }
+    }
+}
+
+/** Plugin for automating release processes at Sonatype Nexus
+  */
+object Sonatype extends LogSupport {
+  wvlet.log.Logger.init
+
+  val sonatypeLegacy = "oss.sonatype.org"
+  val sonatype01 = "s01.oss.sonatype.org"
+  val github = "github.com"
+  val gitlab = "gitlab.com"
 }

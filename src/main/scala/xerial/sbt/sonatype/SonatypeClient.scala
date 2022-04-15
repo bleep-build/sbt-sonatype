@@ -9,7 +9,6 @@ import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.impl.client.BasicCredentialsProvider
 import org.sonatype.spice.zapper.ParametersBuilder
 import org.sonatype.spice.zapper.client.hc4.Hc4ClientBuilder
-import sbt.librarymanagement.ivy.{Credentials, DirectCredentials}
 import wvlet.airframe.control.{Control, ResultClass, Retry}
 import wvlet.airframe.http.HttpHeader.MediaType
 import wvlet.airframe.http.HttpMessage.{Request, Response}
