@@ -8,20 +8,21 @@
 package xerial.sbt
 
 import bleep.logging.Logger
-import sbt.librarymanagement.{MavenRepository, Resolver}
-import wvlet.log.{LogLevel, LogSupport}
+import bleep.model
+import nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
 import xerial.sbt.sonatype.SonatypeClient.StagingRepositoryProfile
 import xerial.sbt.sonatype.SonatypeService._
-import xerial.sbt.sonatype.{Credentials, SonatypeClient, SonatypeService}
+import xerial.sbt.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
 
-import java.io.File
+import java.net.URI
+import java.nio.file.Path
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.hashing.MurmurHash3
 
-abstract class Sonatype(
+case class Sonatype(
     logger: Logger,
-    sonatypeBundleDirectory: File,
+    sonatypeBundleDirectory: Path,
     organization: String,
     bundleName: String,
     version: String
@@ -45,41 +46,38 @@ abstract class Sonatype(
     )
 
   /* Default Sonatype publishTo target */
-  lazy val sonatypePublishToBundle: Resolver =
+  lazy val sonatypePublishToBundle: model.Repository =
     // Sonatype snapshot repositories have no support for bundle upload,
     // so use direct publishing to the snapshot repo.
     if (version.endsWith("-SNAPSHOT")) sonatypeSnapshotResolver
-    else Resolver.file("sonatype-local-bundle", sonatypeBundleDirectory)
+    else model.Repository.Folder(Some("sonatype-local-bundle"), sonatypeBundleDirectory)
 
   /* Sonatype snapshot resolver */
   lazy val sonatypeSnapshotResolver =
-    MavenRepository(
-      s"${sonatypeCredentialHost.replace('.', '-')}-snapshots",
-      s"https://$sonatypeCredentialHost/content/repositories/snapshots"
+    model.Repository.Maven(
+      Some(s"${sonatypeCredentialHost.replace('.', '-')}-snapshots"),
+      new URI(s"https://$sonatypeCredentialHost/content/repositories/snapshots")
     )
 
   /* Sonatype staging resolver */
   lazy val sonatypeStagingResolver =
-    MavenRepository(
-      s"${sonatypeCredentialHost.replace('.', '-')}-staging",
-      s"https://$sonatypeCredentialHost/service/local/staging/deploy/maven2"
+    model.Repository.Maven(
+      Some(s"${sonatypeCredentialHost.replace('.', '-')}-staging"),
+      new URI(s"https://$sonatypeCredentialHost/service/local/staging/deploy/maven2")
     )
 
   /* milliseconds before giving up Sonatype API requests */
-  lazy val sonatypeTimeoutMillis = 60 * 60 * 1000 // 60 minutes
+  lazy val sonatypeTimeoutMillis = 60.toLong * 60 * 1000 // 60 minutes
 
   /* Used for identifying a sonatype staging repository */
   lazy val sonatypeSessionName = s"[sbt-sonatype] $bundleName $version"
 
-  /* log level: trace, debug, info warn, error */
-  lazy val sonatypeLogLevel = "info"
-
   private def prepare(rest: SonatypeService): StagingRepositoryProfile = {
     logger.info(s"Preparing a new staging repository for $sonatypeSessionName")
     // Drop a previous staging repository if exists
-    val dropTask = Future.apply(rest.dropIfExistsByKey(sonatypeSessionName))
+    val dropTask = Future(rest.dropIfExistsByKey(sonatypeSessionName))
     // Create a new one
-    val createTask = Future.apply(rest.createStage(sonatypeSessionName))
+    val createTask = Future(rest.createStage(sonatypeSessionName))
     // Run two tasks in parallel
     val merged = dropTask.zip(createTask)
     val (droppedRepo @ _, createdRepo) = Await.result(merged, Duration.Inf)
@@ -87,24 +85,30 @@ abstract class Sonatype(
   }
 
   def withSonatypeService[T](body: SonatypeService => T): T = {
-    val logLevel = LogLevel(sonatypeLogLevel)
-    wvlet.log.Logger.setDefaultLogLevel(logLevel)
-
-    val repositoryUrl = sonatypeRepository
-    val credentialHost = sonatypeCredentialHost
-
     val hashsum: String = {
-      val input = Vector(repositoryUrl, credential.toString, credentialHost).mkString("-")
+      val input = Vector(sonatypeRepository, credential.toString, sonatypeCredentialHost).mkString("-")
       MurmurHash3.stringHash(input).abs.toString
     }
 
+    val directCredentials: DirectCredentials = {
+      Credentials
+        .forHost(credential.toList, sonatypeCredentialHost)
+        .getOrElse {
+          throw SonatypeException(
+            SonatypeException.MISSING_CREDENTIAL,
+            s"No credential is found for $sonatypeCredentialHost. Prepare ~/.sbt/(sbt_version)/sonatype.sbt file."
+          )
+        }
+    }
+
     val sonatypeClient = new SonatypeClient(
-      repositoryUrl = repositoryUrl,
-      cred = credential.toList,
-      credentialHost = credentialHost,
-      timeoutMillis = sonatypeTimeoutMillis
+      repositoryUrl = sonatypeRepository,
+      directCredentials = directCredentials,
+      timeoutMillis = sonatypeTimeoutMillis,
+      logger
     )
     val service = new SonatypeService(
+      logger,
       sonatypeClient,
       sonatypeProfileName,
       Some(hashsum)
@@ -117,7 +121,7 @@ abstract class Sonatype(
   def sonatypeBundleRelease(): StagingRepositoryProfile =
     withSonatypeService { rest =>
       val repo = prepare(rest)
-      rest.uploadBundle(sonatypeBundleDirectory, repo.deployPath)
+      rest.uploadBundle(sonatypeBundleDirectory.toFile, repo.deployPath)
       rest.closeAndPromote(repo)
       repo
     }
@@ -128,7 +132,7 @@ abstract class Sonatype(
       val repo = sonatypeTargetRepositoryProfile.getOrElse {
         rest.openOrCreateByKey(sonatypeSessionName)
       }
-      rest.uploadBundle(sonatypeBundleDirectory, repo.deployPath)
+      rest.uploadBundle(sonatypeBundleDirectory.toFile, repo.deployPath)
       repo
     }
 
@@ -193,7 +197,7 @@ abstract class Sonatype(
   def sonatypeReleaseAll(): Unit =
     withSonatypeService { rest =>
       val tasks = rest.stagingRepositoryProfiles().map { repo =>
-        Future.apply(rest.closeAndPromote(repo))
+        Future(rest.closeAndPromote(repo))
       }
       val merged = Future.sequence(tasks)
       Await.result(merged, Duration.Inf)
@@ -204,7 +208,7 @@ abstract class Sonatype(
   def sonatypeDropAll(): Unit =
     withSonatypeService { rest =>
       val dropTasks = rest.stagingRepositoryProfiles().map { repo =>
-        Future.apply(rest.dropStage(repo))
+        Future(rest.dropStage(repo))
       }
       val merged = Future.sequence(dropTasks)
       Await.result(merged, Duration.Inf)
@@ -220,7 +224,7 @@ abstract class Sonatype(
       for ((repo, activities) <- alist) {
         logger.info(s"Staging activities of $repo:")
         for (a <- activities)
-          a.showProgress
+          a.showProgress(logger)
       }
       ()
     }
@@ -252,9 +256,7 @@ abstract class Sonatype(
 
 /** Plugin for automating release processes at Sonatype Nexus
   */
-object Sonatype extends LogSupport {
-  wvlet.log.Logger.init
-
+object Sonatype {
   val sonatypeLegacy = "oss.sonatype.org"
   val sonatype01 = "s01.oss.sonatype.org"
   val github = "github.com"

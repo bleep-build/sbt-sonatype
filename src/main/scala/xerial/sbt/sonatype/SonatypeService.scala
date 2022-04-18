@@ -1,34 +1,32 @@
 package xerial.sbt.sonatype
 
-import java.io.File
-
-import sbt.io.IO
+import bleep.logging.Logger
 import wvlet.airframe.codec.MessageCodecFactory
-import wvlet.log.LogSupport
-import xerial.sbt.sonatype.SonatypeClient._
+import xerial.sbt.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
+import xerial.sbt.sonatype.SonatypeService._
 import xerial.sbt.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
 
+import java.io.File
+import java.nio.file.Files
 import scala.util.Try
 
 /** Interface to access the REST API of Nexus
   * @param profileName
   */
 class SonatypeService(
+    logger: Logger,
     sonatypClient: SonatypeClient,
     val profileName: String,
     cacheToken: Option[String]
-) extends LogSupport
-    with AutoCloseable {
-  import SonatypeService._
+) extends AutoCloseable {
 
-  def this(sonatypClient: SonatypeClient, profileName: String) = this(sonatypClient, profileName, None)
+  def this(logger: Logger, sonatypClient: SonatypeClient, profileName: String) = this(logger, sonatypClient, profileName, None)
 
-  info(s"sonatypeRepository  : ${sonatypClient.repoUri}")
-  info(s"sonatypeProfileName : ${profileName}")
+  logger.info(s"sonatypeRepository  : ${sonatypClient.repoUri}")
+  logger.info(s"sonatypeProfileName : ${profileName}")
 
-  override def close(): Unit = {
+  override def close(): Unit =
     sonatypClient.close()
-  }
 
   def findTargetRepository(command: CommandType, arg: Option[String]): StagingRepositoryProfile = {
     val repos = command match {
@@ -39,26 +37,25 @@ class SonatypeService(
     }
     if (repos.isEmpty) {
       if (stagingProfiles.isEmpty) {
-        error(s"No staging profile found for $profileName")
-        error("Have you requested a staging profile and successfully published your signed artifact there?")
+        logger.error(s"No staging profile found for $profileName")
+        logger.error("Have you requested a staging profile and successfully published your signed artifact there?")
         throw SonatypeException(MISSING_STAGING_PROFILE, s"No staging profile found for $profileName")
       } else {
         throw new IllegalStateException(command.errNotFound)
       }
     }
 
-    def findSpecifiedInArg(target: String) = {
+    def findSpecifiedInArg(target: String) =
       repos.find(_.repositoryId == target).getOrElse {
-        error(s"Repository $target is not found")
-        error(s"Specify one of the repository ids in:\n${repos.mkString("\n")}")
+        logger.error(s"Repository $target is not found")
+        logger.error(s"Specify one of the repository ids in:\n${repos.mkString("\n")}")
         throw SonatypeException(UNKNOWN_STAGE, s"Repository $target is not found")
       }
-    }
 
     arg.map(findSpecifiedInArg).getOrElse {
       if (repos.size > 1) {
-        error(s"Multiple repositories are found:\n${repos.mkString("\n")}")
-        error(s"Specify one of the repository ids in the command line or run sonatypeDropAll to cleanup repositories")
+        logger.error(s"Multiple repositories are found:\n${repos.mkString("\n")}")
+        logger.error(s"Specify one of the repository ids in the command line or run sonatypeDropAll to cleanup repositories")
         throw SonatypeException(MULTIPLE_TARGETS, "Found multiple staging repositories")
       } else {
         repos.head
@@ -66,12 +63,11 @@ class SonatypeService(
     }
   }
 
-  def openRepositories   = stagingRepositoryProfiles().filter(_.isOpen).sortBy(_.repositoryId)
+  def openRepositories = stagingRepositoryProfiles().filter(_.isOpen).sortBy(_.repositoryId)
   def closedRepositories = stagingRepositoryProfiles().filter(_.isClosed).sortBy(_.repositoryId)
 
-  def uploadBundle(localBundlePath: File, deployPath: String): Unit = {
+  def uploadBundle(localBundlePath: File, deployPath: String): Unit =
     sonatypClient.uploadBundle(localBundlePath, deployPath)
-  }
 
   def openOrCreateByKey(descriptionKey: String): StagingRepositoryProfile = {
     // Find the already opened profile or create a new one
@@ -83,11 +79,11 @@ class SonatypeService(
       )
     } else if (repos.size == 1) {
       val repo = repos.head
-      info(s"Found a staging repository ${repo}")
+      logger.info(s"Found a staging repository ${repo}")
       repo
     } else {
       // Create a new staging repository by appending [sbt-sonatype] prefix to its description so that we can find the repository id later
-      info(s"No staging repository for ${descriptionKey} is found. Create a new one.")
+      logger.info(s"No staging repository for ${descriptionKey} is found. Create a new one.")
       createStage(descriptionKey)
     }
   }
@@ -96,48 +92,47 @@ class SonatypeService(
     // Drop the staging repository if exists
     val repos = findStagingRepositoryProfilesWithKey(descriptionKey)
     if (repos.isEmpty) {
-      info(s"No previous staging repository for ${descriptionKey} was found")
+      logger.info(s"No previous staging repository for ${descriptionKey} was found")
       None
     } else {
       repos.map { repo =>
-        info(s"Found a previous staging repository ${repo}")
+        logger.info(s"Found a previous staging repository ${repo}")
         dropStage(repo)
       }.lastOption
     }
   }
 
-  def findStagingRepositoryProfilesWithKey(descriptionKey: String): Seq[StagingRepositoryProfile] = {
+  def findStagingRepositoryProfilesWithKey(descriptionKey: String): Seq[StagingRepositoryProfile] =
     stagingRepositoryProfiles(warnIfMissing = false).filter(_.description == descriptionKey)
-  }
 
   def stagingRepositoryProfiles(warnIfMissing: Boolean = true): Seq[StagingRepositoryProfile] = {
     // Note: using /staging/profile_repositories/(profile id) is preferred to reduce the response size,
     // but Sonatype API is quite slow (as of Sep 2019) so using a single request was much better.
-    val response   = sonatypClient.stagingRepositoryProfiles
+    val response = sonatypClient.stagingRepositoryProfiles
     val myProfiles = response.filter(_.profileName == profileName)
     if (myProfiles.isEmpty && warnIfMissing) {
-      warn(s"No staging repository is found. Do publishSigned first.")
+      logger.warn(s"No staging repository is found. Do publishSigned first.")
     }
     myProfiles
   }
 
   private def withCache[A: scala.reflect.runtime.universe.TypeTag](label: String, fileName: String, a: => A): A = {
-    val codec     = MessageCodecFactory.defaultFactoryForJSON.of[A]
-    val cachedir  = (Vector("sbt", "sonatype") ++ cacheToken).mkString("-")
+    val codec = MessageCodecFactory.defaultFactoryForJSON.of[A]
+    val cachedir = (Vector("sbt", "sonatype") ++ cacheToken).mkString("-")
     val cacheRoot = new File(s"target/${cachedir}")
     val cacheFile = new File(cacheRoot, fileName)
     val value: A = if (cacheFile.exists() && cacheFile.length() > 0) {
       Try {
-        val json   = IO.read(cacheFile)
+        val json = Files.readString(cacheFile.toPath)
         val retval = codec.fromJson(json)
-        info(s"Using cached ${label}...")
+        logger.info(s"Using cached ${label}...")
         retval
       }.getOrElse(a)
     } else {
       a
     }
     cacheFile.getParentFile.mkdirs()
-    IO.write(cacheFile, codec.toJson(value))
+    Files.writeString(cacheFile.toPath, codec.toJson(value))
     value
   }
 
@@ -157,28 +152,26 @@ class SonatypeService(
     profiles.head
   }
 
-  def createStage(description: String = "Requested by sbt-sonatype plugin"): StagingRepositoryProfile = {
+  def createStage(description: String = "Requested by sbt-sonatype plugin"): StagingRepositoryProfile =
     sonatypClient.createStage(currentProfile, description)
-  }
 
-  def closeStage(repo: StagingRepositoryProfile): StagingRepositoryProfile = {
+  def closeStage(repo: StagingRepositoryProfile): StagingRepositoryProfile =
     if (repo.isClosed || repo.isReleased) {
-      info(s"Repository ${repo.repositoryId} is already closed")
+      logger.info(s"Repository ${repo.repositoryId} is already closed")
       repo
     } else {
       sonatypClient.closeStage(currentProfile, repo)
     }
-  }
 
   def dropStage(repo: StagingRepositoryProfile): StagingRepositoryProfile = {
     sonatypClient.dropStage(currentProfile, repo)
-    info(s"Dropped successfully: ${repo.repositoryId}")
+    logger.info(s"Dropped successfully: ${repo.repositoryId}")
     repo.toDropped
   }
 
   def promoteStage(repo: StagingRepositoryProfile): StagingRepositoryProfile = {
     if (repo.isReleased) {
-      info(s"Repository ${repo.repositoryId} is already released")
+      logger.info(s"Repository ${repo.repositoryId} is already released")
     } else {
       // Post promote(release) request
       sonatypClient.promoteStage(currentProfile, repo)
@@ -186,23 +179,19 @@ class SonatypeService(
     dropStage(repo.toReleased)
   }
 
-  def stagingRepositoryInfo(repositoryId: String) = {
+  def stagingRepositoryInfo(repositoryId: String) =
     sonatypClient.stagingRepository(repositoryId)
-  }
 
-  def closeAndPromote(repo: StagingRepositoryProfile): StagingRepositoryProfile = {
+  def closeAndPromote(repo: StagingRepositoryProfile): StagingRepositoryProfile =
     if (repo.isReleased) {
       dropStage(repo)
     } else {
       val closed = closeStage(repo)
       promoteStage(closed)
     }
-  }
 
-  def activities: Seq[(StagingRepositoryProfile, Seq[StagingActivity])] = {
+  def activities: Seq[(StagingRepositoryProfile, Seq[StagingActivity])] =
     for (r <- stagingRepositoryProfiles()) yield r -> sonatypClient.activitiesOf(r)
-  }
-
 }
 
 object SonatypeService {
@@ -224,5 +213,4 @@ object SonatypeService {
   case object CloseAndPromote extends CommandType {
     def errNotFound = "No staging repository is found. Run publishSigned first"
   }
-
 }
