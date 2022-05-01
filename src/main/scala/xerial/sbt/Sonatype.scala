@@ -23,14 +23,13 @@ import scala.util.hashing.MurmurHash3
 case class Sonatype(
     logger: Logger,
     sonatypeBundleDirectory: Path,
-    organization: String,
+    /* Profile name at Sonatype: e.g. org.xerial */
+    sonatypeProfileName: String,
     bundleName: String,
     version: String
 )(implicit ec: ExecutionContext = ExecutionContext.global) {
   /* Sonatype repository URL: e.g. https://oss.sonatype.org/service/local */
   lazy val sonatypeRepository: String = s"https://$sonatypeCredentialHost/service/local"
-  /* Profile name at Sonatype: e.g. org.xerial */
-  lazy val sonatypeProfileName: String = organization
   /* Credential host. Default is oss.sonatype.org */
   lazy val sonatypeCredentialHost: String = Sonatype.sonatypeLegacy
 
