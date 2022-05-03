@@ -26,12 +26,12 @@ case class Sonatype(
     /* Profile name at Sonatype: e.g. org.xerial */
     sonatypeProfileName: String,
     bundleName: String,
-    version: String
+    version: String,
+    /* Credential host. Default is oss.sonatype.org */
+    sonatypeCredentialHost: String = Sonatype.sonatypeLegacy
 )(implicit ec: ExecutionContext = ExecutionContext.global) {
   /* Sonatype repository URL: e.g. https://oss.sonatype.org/service/local */
   lazy val sonatypeRepository: String = s"https://$sonatypeCredentialHost/service/local"
-  /* Credential host. Default is oss.sonatype.org */
-  lazy val sonatypeCredentialHost: String = Sonatype.sonatypeLegacy
 
   lazy val credential: Option[Credentials] =
     for {
@@ -89,7 +89,7 @@ case class Sonatype(
       MurmurHash3.stringHash(input).abs.toString
     }
 
-    val directCredentials: DirectCredentials = {
+    val directCredentials: DirectCredentials =
       Credentials
         .forHost(credential.toList, sonatypeCredentialHost)
         .getOrElse {
@@ -98,7 +98,6 @@ case class Sonatype(
             s"No credential is found for $sonatypeCredentialHost. Prepare ~/.sbt/(sbt_version)/sonatype.sbt file."
           )
         }
-    }
 
     val sonatypeClient = new SonatypeClient(
       repositoryUrl = sonatypeRepository,
