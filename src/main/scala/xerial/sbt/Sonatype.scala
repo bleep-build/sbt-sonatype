@@ -49,7 +49,7 @@ case class Sonatype(
     // Sonatype snapshot repositories have no support for bundle upload,
     // so use direct publishing to the snapshot repo.
     if (version.endsWith("-SNAPSHOT")) sonatypeSnapshotResolver
-    else model.Repository.Folder(Some("sonatype-local-bundle"), sonatypeBundleDirectory)
+    else model.Repository.MavenFolder(Some("sonatype-local-bundle"), sonatypeBundleDirectory)
 
   /* Sonatype snapshot resolver */
   lazy val sonatypeSnapshotResolver =
