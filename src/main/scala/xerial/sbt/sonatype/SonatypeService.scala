@@ -1,10 +1,10 @@
-package xerial.sbt.sonatype
+package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
+import bleep.plugin.sonatype.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
+import bleep.plugin.sonatype.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
+import bleep.plugin.sonatype.sonatype.SonatypeService._
 import wvlet.airframe.codec.MessageCodecFactory
-import xerial.sbt.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
-import xerial.sbt.sonatype.SonatypeService._
-import xerial.sbt.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
 
 import java.io.File
 import java.nio.file.Files

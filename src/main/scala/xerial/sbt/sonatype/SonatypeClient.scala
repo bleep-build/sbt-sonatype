@@ -1,7 +1,8 @@
-package xerial.sbt.sonatype
+package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
-import nosbt.librarymanagement.ivy.DirectCredentials
+import bleep.plugin.nosbt.librarymanagement.ivy.DirectCredentials
+import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.impl.client.BasicCredentialsProvider
 import org.sonatype.spice.zapper.ParametersBuilder
@@ -11,7 +12,6 @@ import wvlet.airframe.http.HttpHeader.MediaType
 import wvlet.airframe.http.HttpMessage.{Request, Response}
 import wvlet.airframe.http._
 import wvlet.airframe.http.client.{URLConnectionClient, URLConnectionClientConfig}
-import xerial.sbt.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 
 import java.io.{File, IOException}
 import java.nio.charset.StandardCharsets
@@ -77,7 +77,7 @@ class SonatypeClient(
   override def close(): Unit =
     Control.closeResources(httpClient, httpClientForCreateStage)
 
-  import xerial.sbt.sonatype.SonatypeClient._
+  import bleep.plugin.sonatype.sonatype.SonatypeClient._
 
   def stagingRepositoryProfiles: Seq[StagingRepositoryProfile] = {
     logger.info("Reading staging repository profiles...")

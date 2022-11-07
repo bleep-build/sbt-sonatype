@@ -5,14 +5,14 @@
 //
 //--------------------------------------
 
-package xerial.sbt
+package bleep.plugin.sonatype
 
 import bleep.logging.Logger
 import bleep.model
-import nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
-import xerial.sbt.sonatype.SonatypeClient.StagingRepositoryProfile
-import xerial.sbt.sonatype.SonatypeService._
-import xerial.sbt.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
+import bleep.plugin.nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
+import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
+import bleep.plugin.sonatype.sonatype.SonatypeService._
+import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
 
 import java.net.URI
 import java.nio.file.Path

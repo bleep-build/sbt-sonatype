@@ -1,4 +1,4 @@
-package xerial.sbt.sonatype
+package bleep.plugin.sonatype.sonatype
 
 /** An exception used for showing only an error message when there is no need to show stack traces
   */
