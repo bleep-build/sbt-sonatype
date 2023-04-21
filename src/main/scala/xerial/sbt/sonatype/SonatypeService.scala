@@ -5,7 +5,7 @@ import bleep.logging.Logger
 import bleep.plugin.sonatype.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
 import bleep.plugin.sonatype.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
 import bleep.plugin.sonatype.sonatype.SonatypeService._
-import wvlet.airframe.codec.MessageCodecFactory
+import wvlet.airframe.codec.{MessageCodec, MessageCodecFactory}
 
 import java.io.File
 import java.nio.file.Files
@@ -117,9 +117,27 @@ class SonatypeService(
     myProfiles
   }
 
-  private lazy val profiles = this.sonatypClient.stagingProfiles
+  private def withCache[A: MessageCodec](label: String, fileName: String, a: => A): A = {
+    val cachedir = (Vector("sbt", "sonatype") ++ cacheToken).mkString("-")
+    val cacheRoot = new File(s"target/${cachedir}")
+    val cacheFile = new File(cacheRoot, fileName)
+    val value: A = if (cacheFile.exists() && cacheFile.length() > 0) {
+      Try {
+        val json = Files.readString(cacheFile.toPath)
+        val retval = implicitly[MessageCodec[A]].fromJson(json)
+        logger.info(s"Using cached ${label}...")
+        retval
+      }.getOrElse(a)
+    } else {
+      a
+    }
+    FileUtils.writeString(logger, None, cacheFile.toPath, implicitly[MessageCodec[A]].toJson(value))
+    value
+  }
 
-  lazy val stagingProfiles: Seq[StagingProfile] = {
+  def stagingProfiles: Seq[StagingProfile] = {
+    implicit val codec: MessageCodec[Seq[StagingProfile]] = MessageCodec.of
+    val profiles = withCache("staging profiles", s"sonatype-profile-${profileName}.json", sonatypClient.stagingProfiles)
     profiles.filter(_.name == profileName)
   }
 
