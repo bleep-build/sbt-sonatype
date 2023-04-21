@@ -136,8 +136,9 @@ class SonatypeService(
     value
   }
 
-  def stagingProfiles: Seq[StagingProfile] = {
-    val profiles = withCache("staging profiles", s"sonatype-profile-${profileName}.json", sonatypClient.stagingProfiles)
+  private lazy val profiles = this.sonatypClient.stagingProfiles
+
+  lazy val stagingProfiles: Seq[StagingProfile] = {
     profiles.filter(_.name == profileName)
   }
 
