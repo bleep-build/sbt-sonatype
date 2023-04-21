@@ -44,7 +44,7 @@ commands:
 ```scala
 // For sbt 1.x (sbt-sonatype 2.3 or higher)
 addSbtPlugin("org.xerial.sbt" % "sbt-sonatype" % "(version)")
-addSbtPlugin("com.jsuereth" % "sbt-pgp" % "2.0.1")
+addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.1.2")
 
 // For sbt 0.13.x (upto sbt-sonatype 2.3)
 addSbtPlugin("org.xerial.sbt" % "sbt-sonatype" % "(version)")
@@ -283,3 +283,16 @@ Then, run `sonatypeReleaseAll` command by specifying your `sonatypeProfileName`.
 $ sbt "sonatypeReleaseAll org.xerial"
 ```
 
+
+
+## For sbt-sonatype developers
+
+Releasing sbt-sonatype to Sonatype:
+
+````
+## Add a new git tag
+$ git tag v3.9.x
+$ ./sbt
+> publishSigned
+> sonatypeBundleRelease
+```

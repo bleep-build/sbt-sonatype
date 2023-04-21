@@ -2,6 +2,7 @@ package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
 import bleep.plugin.nosbt.librarymanagement.ivy.DirectCredentials
+import bleep.plugin.sonatype.sonatype.SonatypeClient._
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.impl.client.BasicCredentialsProvider
@@ -9,9 +10,9 @@ import org.sonatype.spice.zapper.ParametersBuilder
 import org.sonatype.spice.zapper.client.hc4.Hc4ClientBuilder
 import wvlet.airframe.control.{Control, ResultClass, Retry}
 import wvlet.airframe.http.HttpHeader.MediaType
-import wvlet.airframe.http.HttpMessage.{Request, Response}
+import wvlet.airframe.http.HttpMessage.Response
 import wvlet.airframe.http._
-import wvlet.airframe.http.client.{URLConnectionClient, URLConnectionClientConfig}
+import wvlet.airframe.http.client.URLConnectionClientBackend
 
 import java.io.{File, IOException}
 import java.nio.charset.StandardCharsets
@@ -19,7 +20,8 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 
-/** REST API Client for Sonatype API (nexus-staigng) https://repository.sonatype.org/nexus-staging-plugin/default/docs/rest.html
+/** REST API Client for Sonatype API (nexus-staging)
+  * https://repository.sonatype.org/nexus-staging-plugin/default/docs/rest.html
   */
 class SonatypeClient(
     repositoryUrl: String,
@@ -28,7 +30,7 @@ class SonatypeClient(
     logger: Logger
 ) extends AutoCloseable {
 
-  private val base64Credentials =
+  private lazy val base64Credentials =
     Base64.getEncoder.encodeToString(s"${directCredentials.userName}:${directCredentials.passwd}".getBytes(StandardCharsets.UTF_8))
 
   lazy val repoUri = {
@@ -39,34 +41,30 @@ class SonatypeClient(
   private val pathPrefix =
     new java.net.URL(repoUri).getPath
 
-  object SonatypeClientBackend extends HttpClientBackend {
-    def newSyncClient(serverAddress: String, clientConfig: HttpClientConfig): HttpSyncClient[Request, Response] =
-      new URLConnectionClient(
-        ServerAddress(serverAddress),
-        URLConnectionClientConfig(
-          requestFilter = clientConfig.requestFilter,
-          retryContext = clientConfig.retryContext,
-          codecFactory = clientConfig.codecFactory,
-          readTimeout = Duration(timeoutMillis, TimeUnit.MILLISECONDS)
-        )
-      )
+  private[sonatype] val clientConfig = {
+    Http.client
+      // Disables the circuit breaker, because Sonatype can be down for a long time https://github.com/xerial/sbt-sonatype/issues/363
+      .noCircuitBreaker
+      // Use URLConnectionClient for JDK8 compatibility. Remove this line when using JDK11 or later
+      .withBackend(URLConnectionClientBackend)
+      .withJSONEncoding
+      // Need to set a longer timeout as Sonatype API may not respond quickly
+      .withReadTimeout(Duration(timeoutMillis, TimeUnit.MILLISECONDS))
+      // airframe-http will retry the request several times within this timeout duration.
+      .withRetryContext { context =>
+        // For individual REST calls, use a normal jittering
+        context
+          .withMaxRetry(1000)
+          .withJitter(initialIntervalMillis = 1500, maxIntervalMillis = 30000)
+      }
+      .withRequestFilter { request =>
+        request.withContentTypeJson
+          .withAccept(MediaType.ApplicationJson)
+          .withHeader(HttpHeader.Authorization, s"Basic ${base64Credentials}")
+      }
   }
 
-  private val clientConfig = HttpClientConfig(SonatypeClientBackend)
-    // airframe-http will retry the request several times within this timeout duration.
-    .withRetryContext { context =>
-      // For individual REST calls, use a normal jittering
-      context
-        .withMaxRetry(100)
-        .withJitter(initialIntervalMillis = 1500, maxIntervalMillis = 30000)
-    }
-    .withRequestFilter { request =>
-      request.withContentTypeJson
-        .withAccept(MediaType.ApplicationJson)
-        .withHeader(HttpHeader.Authorization, s"Basic ${base64Credentials}")
-    }
-
-  private val httpClient = clientConfig.newSyncClient(repoUri)
+  private[sonatype] val httpClient = clientConfig.newSyncClient(repoUri)
 
   // Create stage is not idempotent, so we just need to wait for a long time without retry
   private val httpClientForCreateStage =
@@ -77,30 +75,30 @@ class SonatypeClient(
   override def close(): Unit =
     Control.closeResources(httpClient, httpClientForCreateStage)
 
-  import bleep.plugin.sonatype.sonatype.SonatypeClient._
-
   def stagingRepositoryProfiles: Seq[StagingRepositoryProfile] = {
     logger.info("Reading staging repository profiles...")
     val result =
-      httpClient.get[Map[String, Seq[StagingRepositoryProfile]]](s"${pathPrefix}/staging/profile_repositories")
+      httpClient.readAs[Map[String, Seq[StagingRepositoryProfile]]](
+        Http.GET(s"${pathPrefix}/staging/profile_repositories")
+      )
     result.getOrElse("data", Seq.empty)
   }
 
   def stagingRepository(repositoryId: String) = {
     logger.info(s"Searching for repository ${repositoryId} ...")
-    httpClient.get[String](s"${pathPrefix}/staging/repository/${repositoryId}")
+    httpClient.readAs[String](Http.GET(s"${pathPrefix}/staging/repository/${repositoryId}"))
   }
 
   def stagingProfiles: Seq[StagingProfile] = {
     logger.info("Reading staging profiles...")
-    val result = httpClient.get[StagingProfileResponse](s"${pathPrefix}/staging/profiles")
+    val result = httpClient.readAs[StagingProfileResponse](Http.GET(s"${pathPrefix}/staging/profiles"))
     result.data
   }
 
   def createStage(profile: StagingProfile, description: String): StagingRepositoryProfile = {
     logger.info(s"Creating a staging repository in profile ${profile.name} with a description key: ${description}")
-    val ret = httpClientForCreateStage.postOps[Map[String, Map[String, String]], CreateStageResponse](
-      s"${pathPrefix}/staging/profiles/${profile.id}/start",
+    val ret = httpClientForCreateStage.call[Map[String, Map[String, String]], CreateStageResponse](
+      Http.POST(s"${pathPrefix}/staging/profiles/${profile.id}/start"),
       Map("data" -> Map("description" -> description))
     )
     // Extract created staging repository ids
@@ -171,8 +169,8 @@ class SonatypeClient(
 
   def closeStage(currentProfile: StagingProfile, repo: StagingRepositoryProfile): StagingRepositoryProfile = {
     logger.info(s"Closing staging repository $repo")
-    val ret = httpClient.postOps[Map[String, StageTransitionRequest], Response](
-      s"${pathPrefix}/staging/profiles/${repo.profileId}/finish",
+    val ret = httpClient.call[Map[String, StageTransitionRequest], Response](
+      Http.POST(s"${pathPrefix}/staging/profiles/${repo.profileId}/finish"),
       newStageTransitionRequest(currentProfile, repo)
     )
     if (ret.statusCode != HttpStatus.Created_201.code) {
@@ -187,8 +185,8 @@ class SonatypeClient(
 
   def promoteStage(currentProfile: StagingProfile, repo: StagingRepositoryProfile): StagingRepositoryProfile = {
     logger.info(s"Promoting staging repository $repo")
-    val ret = httpClient.postOps[Map[String, StageTransitionRequest], Response](
-      s"${pathPrefix}/staging/profiles/${repo.profileId}/promote",
+    val ret = httpClient.call[Map[String, StageTransitionRequest], Response](
+      Http.POST(s"${pathPrefix}/staging/profiles/${repo.profileId}/promote"),
       newStageTransitionRequest(currentProfile, repo)
     )
     if (ret.statusCode != HttpStatus.Created_201.code) {
@@ -200,14 +198,20 @@ class SonatypeClient(
 
   def dropStage(currentProfile: StagingProfile, repo: StagingRepositoryProfile): Response = {
     logger.info(s"Dropping staging repository $repo")
-    val ret = httpClient.postOps[Map[String, StageTransitionRequest], Response](
-      s"${pathPrefix}/staging/profiles/${repo.profileId}/drop",
-      newStageTransitionRequest(currentProfile, repo)
-    )
-    if (ret.statusCode != HttpStatus.Created_201.code) {
-      throw SonatypeException(STAGE_FAILURE, s"Failed to drop the repository. [${ret.status}]: ${ret.contentString}")
+    try {
+      val ret = httpClient.call[Map[String, StageTransitionRequest], Response](
+        Http.POST(s"${pathPrefix}/staging/profiles/${repo.profileId}/drop"),
+        newStageTransitionRequest(currentProfile, repo)
+      )
+      if (ret.statusCode != HttpStatus.Created_201.code) {
+        throw SonatypeException(STAGE_FAILURE, s"Failed to drop the repository. [${ret.status}]: ${ret.contentString}")
+      }
+      ret
+    } catch {
+      case e: HttpClientException if e.status == HttpStatus.NotFound_404 =>
+        logger.warn(s"Staging repository ${repo.profileId} is not found. It might already have been dropped: ${e.getMessage}")
+        e.response.toHttpResponse
     }
-    ret
   }
 
   private def newStageTransitionRequest(
@@ -224,12 +228,18 @@ class SonatypeClient(
 
   def activitiesOf(r: StagingRepositoryProfile): Seq[StagingActivity] = {
     logger.debug(s"Checking activity logs of ${r.repositoryId} ...")
-    httpClient.get[Seq[StagingActivity]](s"${pathPrefix}/staging/repository/${r.repositoryId}/activity")
+    httpClient.readAs[Seq[StagingActivity]](Http.GET(s"${pathPrefix}/staging/repository/${r.repositoryId}/activity"))
   }
 
   def uploadBundle(localBundlePath: File, deployPath: String): Unit =
     retryer
       .retryOn {
+        case e: IOException if e.getMessage.contains("502 Bad Gateway") =>
+          // #303 502 can be returned during the bundle upload
+          Retry.retryableFailure(e)
+        case e: IOException if e.getMessage.contains("Operation timed out") =>
+          // #223 SSLException
+          Retry.retryableFailure(e)
         case e: IOException if e.getMessage.contains("400 Bad Request") =>
           Retry.nonRetryableFailure(
             SonatypeException(

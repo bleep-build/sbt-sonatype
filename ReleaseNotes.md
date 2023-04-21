@@ -1,6 +1,19 @@
 Release Notes
 ===
 
+# 3.9.14
+ 
+- Upgraded airframe-http to 22.11.0
+- Add more Sonatype API error handling
+- Upgrade to sbt 1.7.3
+- Use sbt-dynver for versioning
+
+# 3.9.13
+
+- Upgraded airframe-http to 22.5.0 to fix JDK17-specific error [#293](https://github.com/xerial/sbt-sonatype/issues/293)
+- Reverted the fix for #276 due to the regression
+
+
 # 3.9.12 
 - DO NOT USE THIS VERSION. A regression, which failed to find a proper sonatype credential, is reported. Use 3.9.11 instead
 - A fix for [#276](https://github.com/xerial/sbt-sonatype/issues/276): Always use `ThisBuild / sonatypeCredentialHost` setting [#285](https://github.com/xerial/sbt-sonatype/pull/285)
