@@ -4,8 +4,8 @@ import bleep.internal.FileUtils
 import bleep.logging.Logger
 import bleep.plugin.sonatype.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
 import bleep.plugin.sonatype.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
-import bleep.plugin.sonatype.sonatype.SonatypeService._
-import wvlet.airframe.codec.{MessageCodec, MessageCodecFactory}
+import bleep.plugin.sonatype.sonatype.SonatypeService.*
+import wvlet.airframe.codec.MessageCodec
 
 import java.io.File
 import java.nio.file.Files
