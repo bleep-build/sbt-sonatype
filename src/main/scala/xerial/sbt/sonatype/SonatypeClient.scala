@@ -1,7 +1,7 @@
 package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
-import bleep.plugin.nosbt.librarymanagement.ivy.DirectCredentials
+import bleep.nosbt.librarymanagement.ivy.DirectCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient._
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}

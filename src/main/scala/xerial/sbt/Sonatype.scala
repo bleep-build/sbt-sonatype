@@ -9,9 +9,9 @@ package bleep.plugin.sonatype
 
 import bleep.logging.Logger
 import bleep.model
-import bleep.plugin.nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
+import bleep.nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
-import bleep.plugin.sonatype.sonatype.SonatypeService._
+import bleep.plugin.sonatype.sonatype.SonatypeService.*
 import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
 
 import java.net.URI
