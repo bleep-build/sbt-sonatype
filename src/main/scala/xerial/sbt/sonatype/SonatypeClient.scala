@@ -2,7 +2,7 @@ package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
 import bleep.nosbt.librarymanagement.ivy.DirectCredentials
-import bleep.plugin.sonatype.sonatype.SonatypeClient._
+import bleep.plugin.sonatype.sonatype.SonatypeClient.*
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.impl.client.BasicCredentialsProvider
@@ -11,10 +11,11 @@ import org.sonatype.spice.zapper.client.hc4.Hc4ClientBuilder
 import wvlet.airframe.control.{Control, ResultClass, Retry}
 import wvlet.airframe.http.HttpHeader.MediaType
 import wvlet.airframe.http.HttpMessage.Response
-import wvlet.airframe.http._
+import wvlet.airframe.http.*
 import wvlet.airframe.http.client.URLConnectionClientBackend
 
 import java.io.{File, IOException}
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.concurrent.TimeUnit
@@ -39,7 +40,7 @@ class SonatypeClient(
     url
   }
   private val pathPrefix =
-    new java.net.URL(repoUri).getPath
+    URI.create(repoUri).toURL.getPath
 
   private[sonatype] val clientConfig = {
     Http.client
