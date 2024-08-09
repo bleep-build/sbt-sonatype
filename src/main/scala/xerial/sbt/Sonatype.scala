@@ -5,10 +5,10 @@
 //
 //--------------------------------------
 
-package bleep.plugin.sonatype
+package bleep
+package plugin.sonatype
 
 import bleep.logging.Logger
-import bleep.model
 import bleep.nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
 import bleep.plugin.sonatype.sonatype.SonatypeService.*
@@ -120,7 +120,7 @@ case class Sonatype(
     withSonatypeService { rest =>
       val repo = prepare(rest)
       rest.uploadBundle(sonatypeBundleDirectory.toFile, repo.deployPath)
-      rest.closeAndPromote(repo)
+      rest.closeAndPromote(repo).discard()
       repo
     }
 
@@ -187,8 +187,7 @@ case class Sonatype(
   def sonatypeClean(): Unit =
     withSonatypeService { rest =>
       val descriptionKey = sonatypeSessionName
-      rest.dropIfExistsByKey(descriptionKey)
-      ()
+      rest.dropIfExistsByKey(descriptionKey).discard()
     }
 
   /* Publish all staging repositories to Maven central */
@@ -198,8 +197,7 @@ case class Sonatype(
         Future(rest.closeAndPromote(repo))
       }
       val merged = Future.sequence(tasks)
-      Await.result(merged, Duration.Inf)
-      ()
+      Await.result(merged, Duration.Inf).discard()
     }
 
   /* Drop all staging repositories */
@@ -209,8 +207,7 @@ case class Sonatype(
         Future(rest.dropStage(repo))
       }
       val merged = Future.sequence(dropTasks)
-      Await.result(merged, Duration.Inf)
-      ()
+      Await.result(merged, Duration.Inf).discard()
     }
 
   /* Show staging activity logs at Sonatype */

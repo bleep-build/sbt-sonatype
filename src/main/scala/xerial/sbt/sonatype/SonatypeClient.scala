@@ -9,10 +9,9 @@ import org.apache.http.impl.client.BasicCredentialsProvider
 import org.sonatype.spice.zapper.ParametersBuilder
 import org.sonatype.spice.zapper.client.hc4.Hc4ClientBuilder
 import wvlet.airframe.control.{Control, ResultClass, Retry}
+import wvlet.airframe.http.*
 import wvlet.airframe.http.HttpHeader.MediaType
 import wvlet.airframe.http.HttpMessage.Response
-import wvlet.airframe.http.*
-import wvlet.airframe.http.client.URLConnectionClientBackend
 
 import java.io.{File, IOException}
 import java.net.URI
@@ -21,8 +20,7 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 
-/** REST API Client for Sonatype API (nexus-staging)
-  * https://repository.sonatype.org/nexus-staging-plugin/default/docs/rest.html
+/** REST API Client for Sonatype API (nexus-staging) https://repository.sonatype.org/nexus-staging-plugin/default/docs/rest.html
   */
 class SonatypeClient(
     repositoryUrl: String,
@@ -42,13 +40,10 @@ class SonatypeClient(
   private val pathPrefix =
     URI.create(repoUri).toURL.getPath
 
-  private[sonatype] val clientConfig = {
+  private[sonatype] val clientConfig =
     Http.client
       // Disables the circuit breaker, because Sonatype can be down for a long time https://github.com/xerial/sbt-sonatype/issues/363
-      .noCircuitBreaker
-      // Use URLConnectionClient for JDK8 compatibility. Remove this line when using JDK11 or later
-      .withBackend(URLConnectionClientBackend)
-      .withJSONEncoding
+      .noCircuitBreaker.withJSONEncoding
       // Need to set a longer timeout as Sonatype API may not respond quickly
       .withReadTimeout(Duration(timeoutMillis, TimeUnit.MILLISECONDS))
       // airframe-http will retry the request several times within this timeout duration.
@@ -63,7 +58,6 @@ class SonatypeClient(
           .withAccept(MediaType.ApplicationJson)
           .withHeader(HttpHeader.Authorization, s"Basic ${base64Credentials}")
       }
-  }
 
   private[sonatype] val httpClient = clientConfig.newSyncClient(repoUri)
 
@@ -162,7 +156,6 @@ class SonatypeClient(
       .run {
         val activities = activitiesOf(repo)
         monitor.report(logger, activities)
-        activities.lastOption
       }
 
     repo

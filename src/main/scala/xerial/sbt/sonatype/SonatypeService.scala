@@ -1,4 +1,5 @@
-package bleep.plugin.sonatype.sonatype
+package bleep
+package plugin.sonatype.sonatype
 
 import bleep.internal.FileUtils
 import bleep.logging.Logger
@@ -164,7 +165,7 @@ class SonatypeService(
     }
 
   def dropStage(repo: StagingRepositoryProfile): StagingRepositoryProfile = {
-    sonatypClient.dropStage(currentProfile, repo)
+    sonatypClient.dropStage(currentProfile, repo).discard()
     logger.info(s"Dropped successfully: ${repo.repositoryId}")
     repo.toDropped
   }
@@ -174,7 +175,7 @@ class SonatypeService(
       logger.info(s"Repository ${repo.repositoryId} is already released")
     } else {
       // Post promote(release) request
-      sonatypClient.promoteStage(currentProfile, repo)
+      sonatypClient.promoteStage(currentProfile, repo).discard()
     }
     dropStage(repo.toReleased)
   }
