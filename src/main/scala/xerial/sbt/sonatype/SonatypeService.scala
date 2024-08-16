@@ -5,7 +5,6 @@ import bleep.internal.FileUtils
 import bleep.logging.Logger
 import bleep.plugin.sonatype.sonatype.SonatypeClient.{StagingActivity, StagingProfile, StagingRepositoryProfile}
 import bleep.plugin.sonatype.sonatype.SonatypeException.{MISSING_PROFILE, MISSING_STAGING_PROFILE, MULTIPLE_TARGETS, UNKNOWN_STAGE}
-import bleep.plugin.sonatype.sonatype.SonatypeService.*
 import wvlet.airframe.codec.MessageCodec
 
 import java.io.File
@@ -21,6 +20,7 @@ class SonatypeService(
     val profileName: String,
     cacheToken: Option[String]
 ) extends AutoCloseable {
+  import SonatypeService.*
 
   def this(logger: Logger, sonatypClient: SonatypeClient, profileName: String) = this(logger, sonatypClient, profileName, None)
 
@@ -145,10 +145,8 @@ class SonatypeService(
   lazy val currentProfile: StagingProfile = {
     val profiles = stagingProfiles
     if (profiles.isEmpty) {
-      throw SonatypeException(
-        MISSING_PROFILE,
-        s"Profile ${profileName} is not found. Check your sonatypeProfileName setting in build.sbt"
-      )
+      val error = MISSING_PROFILE(profileName, sonatypClient.repoUri.getHost)
+      throw SonatypeException(error, error.message)
     }
     profiles.head
   }

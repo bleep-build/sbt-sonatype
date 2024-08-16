@@ -1,7 +1,7 @@
 package bleep.plugin.sonatype.sonatype
 
 import bleep.logging.Logger
-import bleep.nosbt.librarymanagement.ivy.DirectCredentials
+import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.*
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
@@ -15,8 +15,6 @@ import wvlet.airframe.http.HttpMessage.Response
 
 import java.io.{File, IOException}
 import java.net.URI
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 
@@ -24,24 +22,22 @@ import scala.concurrent.duration.Duration
   */
 class SonatypeClient(
     repositoryUrl: String,
-    directCredentials: DirectCredentials,
+    sonatypeCredentials: SonatypeCredentials,
     timeoutMillis: Long = 3 * 60 * 60 * 1000,
     logger: Logger
 ) extends AutoCloseable {
 
-  private lazy val base64Credentials =
-    Base64.getEncoder.encodeToString(s"${directCredentials.userName}:${directCredentials.passwd}".getBytes(StandardCharsets.UTF_8))
+  private lazy val base64Credentials = sonatypeCredentials.toBase64
 
-  lazy val repoUri = {
-    def repoBase(url: String) = if (url.endsWith("/")) url.dropRight(1) else url
-    val url = repoBase(repositoryUrl)
-    url
-  }
-  private val pathPrefix =
-    URI.create(repoUri).toURL.getPath
+  lazy val repoUri: URI = URI.create(repositoryUrl.stripSuffix("/"))
+
+  private val pathPrefix = repoUri.getPath
 
   private[sonatype] val clientConfig =
     Http.client
+      .withName("sonatype-client")
+      // Put the log file under target/sbt-sonatype directory
+      .withLoggerConfig(_.withLogFileName("target/sbt-sonatype/sonatype_client_logs.json"))
       // Disables the circuit breaker, because Sonatype can be down for a long time https://github.com/xerial/sbt-sonatype/issues/363
       .noCircuitBreaker.withJSONEncoding
       // Need to set a longer timeout as Sonatype API may not respond quickly
@@ -59,13 +55,13 @@ class SonatypeClient(
           .withHeader(HttpHeader.Authorization, s"Basic ${base64Credentials}")
       }
 
-  private[sonatype] val httpClient = clientConfig.newSyncClient(repoUri)
+  private[sonatype] val httpClient = clientConfig.newSyncClient(repoUri.toString)
 
   // Create stage is not idempotent, so we just need to wait for a long time without retry
   private val httpClientForCreateStage =
     clientConfig
       .withRetryContext(_.noRetry)
-      .newSyncClient(repoUri)
+      .newSyncClient(repoUri.toString)
 
   override def close(): Unit =
     Control.closeResources(httpClient, httpClientForCreateStage)
@@ -250,7 +246,7 @@ class SonatypeClient(
 
         val credentialProvider = new BasicCredentialsProvider()
         val usernamePasswordCredentials =
-          new UsernamePasswordCredentials(directCredentials.userName, directCredentials.passwd)
+          new UsernamePasswordCredentials(sonatypeCredentials.userName, sonatypeCredentials.password)
 
         credentialProvider.setCredentials(AuthScope.ANY, usernamePasswordCredentials)
 

@@ -9,10 +9,12 @@ package bleep
 package plugin.sonatype
 
 import bleep.logging.Logger
-import bleep.nosbt.librarymanagement.ivy.{Credentials, DirectCredentials}
+import bleep.nosbt.librarymanagement.ivy.Credentials
+import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
 import bleep.plugin.sonatype.sonatype.SonatypeService.*
 import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
+import xerial.sbt.sonatype.*
 
 import java.net.URI
 import java.nio.file.Path
@@ -20,6 +22,8 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.hashing.MurmurHash3
 
+/** Plugin for automating release processes at Sonatype Nexus
+  */
 case class Sonatype(
     logger: Logger,
     sonatypeBundleDirectory: Path,
@@ -89,9 +93,9 @@ case class Sonatype(
       MurmurHash3.stringHash(input).abs.toString
     }
 
-    val directCredentials: DirectCredentials =
-      Credentials
-        .forHost(credential.toList, sonatypeCredentialHost)
+    val directCredentials: SonatypeCredentials =
+      SonatypeCredentials
+        .fromEnv(credential.toList, sonatypeCredentialHost)
         .getOrElse {
           throw SonatypeException(
             SonatypeException.MISSING_CREDENTIAL,
@@ -101,7 +105,7 @@ case class Sonatype(
 
     val sonatypeClient = new SonatypeClient(
       repositoryUrl = sonatypeRepository,
-      directCredentials = directCredentials,
+      sonatypeCredentials = directCredentials,
       timeoutMillis = sonatypeTimeoutMillis,
       logger
     )
@@ -254,6 +258,9 @@ case class Sonatype(
 object Sonatype {
   val sonatypeLegacy = "oss.sonatype.org"
   val sonatype01 = "s01.oss.sonatype.org"
+  val sonatypeCentralHost = SonatypeCentralClient.host
+  val knownOssHosts       = Seq(sonatypeLegacy, sonatype01)
+
   val github = "github.com"
   val gitlab = "gitlab.com"
 }

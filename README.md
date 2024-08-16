@@ -7,12 +7,12 @@ A sbt plugin for publishing your project to the Maven central repository through
     * Create GPG signed artifacts to a local staging repository.
     * Make sure adding `publishTo := sonatypePublishToBundle.value` to your build.sbt
  * `sonatypeBundleRelease` (New in sbt-sonatype 3.4)
-    * This command will prepare a new remote staging repository at Sonatype. If there are exisiting staging repositories that have the same description with `sonatypeSessionName` key, sbt-sonatype will discard them properly.
+    * This command will prepare a new remote staging repository at Sonatype. If there are  existing staging repositories that have the same description with `sonatypeSessionName` key, sbt-sonatype will discard them properly.
     * Then, it will upload the artifacts in the local staging folder to the remote staging repository. Uploading artifacts as a bundle is much faster than uploading each artifact to Sonatype. For example, thousands of files can be uploaded in several minutes with bundle upload.
-    * Finally, this command will perform the close and release steps at the Sonatype Nexus repository to verify the Maven central requirements.
+    * Finally, this command will perform the close and release steps at the Sonatype Nexus repository to meet the Maven central requirements.
 
  After these steps, your project will be synchronized to the Maven central within ten minutes. No longer need to enter the web interface of
- [Sonatype Nexus repository](http://oss.sonatype.org/) to performe these release steps.
+ [Sonatype Nexus repository](http://oss.sonatype.org/) to perform these release steps.
 
 
 - [Release notes](ReleaseNotes.md)
@@ -55,19 +55,34 @@ addSbtPlugin("com.jsuereth" % "sbt-pgp" % "1.0.0")
 
 ### build.sbt
 
+#### Hosts other than Sonatype Central
+  > ⚠️ Legacy Host
+  >
+  > By default, this plugin is configured to use the legacy Sonatype repository `oss.sonatype.org`. If you created a new account on or after February 2021, add `sonatypeCredentialHost` settings:
+  >
+  > ```sbt
+  > // For all Sonatype accounts created on or after February 2021
+  > import xerial.sbt.Sonatype.sonatype01
+  > 
+  > ThisBuild / sonatypeCredentialHost := sonatype01
+  > ```
+
+#### Sonatype Central Host
+As of early 2024, Sonatype has switched all new account registration over to the Sonatype Central portal and legacy `sonatype.org` accounts will eventually migrate there. To configure sbt to publish to the Sonatype Central portal, simply add the following:
+
+```sbt
+import xerial.sbt.Sonatype.sonatypeCentralHost
+
+ThisBuild / sonatypeCredentialHost := sonatypeCentralHost
+```
+
+#### Usage
+
 To use sbt-sonatype, you need to create a bundle of your project artifacts (e.g., .jar, .javadoc, .asc files, etc.) into a local folder specified by `sonatypeBundleDirectory`. By default, the folder is `(project root)/target/sonatype-staging/(version)`. Add the following `publishTo` setting to create a local bundle of your project:
 ```scala
 publishTo := sonatypePublishToBundle.value
 ```
 
-  > ⚠️ Legacy Host
-  >
-  > By default, this plugin is configured to use the legacy Sonatype repository `oss.sonatype.org`. If you created a new account on or after February 2021, add `sonatypeCredentialHost` settings:
-  >
-  > ```scala
-  > // For all Sonatype accounts created on or after February 2021
-  > ThisBuild / sonatypeCredentialHost := "s01.oss.sonatype.org"
-  > ```
 
 With this setting, `publishSigned` will create a bundle of your project to the local staging folder. If the project has multiple modules, all of the artifacts will be assembled into the same folder to create a single bundle.
 
@@ -75,6 +90,12 @@ If `isSnapshot.value` is true (e.g., if the version name contains -SNAPSHOT), pu
 
 If necessary, you can tweak several configurations:
 ```scala
+    val sonatypeCentralDeploymentName =
+  settingKey[String]("Deployment name. Default is <organization>.<artifact_name>-<version>")
+// [Optional] If you need to manage the default Sonatype Central deployment name, change the setting below. 
+// If publishing multiple modules, ensure that this is set on the module level, rather than on the build level.
+sonatypeCentralDeploymentName := s"${organization.value}.${name.value}-${version.value}"
+
 // [Optional] The local staging folder name:
 sonatypeBundleDirectory := (ThisBuild / baseDirectory).value / target.value.getName / "sonatype-staging" / (ThisBuild / version).value
 
@@ -109,7 +130,7 @@ credentials += Credentials("Sonatype Nexus Repository Manager",
 sbt-sonatype is an auto-plugin, which will automatically configure your build. There are a few settings though that you need to define by yourself:
 
   * `sonatypeProfileName`
-     * This is your Sonatype acount profile name, e.g. `org.xerial`. If you do not set this value, it will be the same with the `organization` value.
+     * This is your Sonatype account profile name, e.g. `org.xerial`. If you do not set this value, it will be the same with the `organization` value.
   * `pomExtra`
      * A fragment of Maven's pom.xml. You must define url, licenses, scm and developers tags in this XML to satisfy [Central Repository sync requirements](http://central.sonatype.org/pages/requirements.html).
 
@@ -159,14 +180,22 @@ Note: If your project version has "SNAPSHOT" suffix, your project will be publis
 
 ## Commands
 
+### Multi-Step Commands:
 Usually, we only need to run `sonatypeBundleRelease` command in sbt-sonatype:
 * __sonatypeBundleRelease__
-  * This will run a sequence of commands `; sonatypePrepare; sonatypeBundleUpload; sonatypeRelease` in one step.
+  * If `sonatypeCredentialHost` is set to a host other than the Sonatype Central portal, this command will run a sequence of commands `; sonatypePrepare; sonatypeBundleUpload; sonatypeRelease` in one step.
+  * If `sonatypeCredentialHost` is set to the Sonatype Central portal, this command will default to the **sonatypeCentralRelease** command.
+  * You must run `publishSigned` before this command to create a local staging bundle.
+* __sonatypeCentralRelease__
+  * This will zip a bundle and upload it to the Sonatype Central portal to be released automatically after validation. This command will fail if the bundle does not pass initial validation after being uploaded.
+  * You must run `publishSigned` before this command to create a local staging bundle.
+* __sonatypeCentralUpload__
+  * This will zip a bundle and upload it to the Sonatype Central portal. The bundle will not be released automatically after validation. Instead, users must manually click on `publish` in the Sonatype Central portal in order to release it. This command will fail if the bundle does not pass initial validation after being uploaded.
   * You must run `publishSigned` before this command to create a local staging bundle.
 
 ### Individual Step Commands
 * __sonatypePrepare__
-  * Drop the exising staging repositories (if exist) and create a new staging repository using `sonatypeSessionName` as a unique key.
+  * Drop the existing staging repositories (if exist) and create a new staging repository using `sonatypeSessionName` as a unique key.
   * This will update `sonatypePublishTo` setting.
   * For cross-build projects, make sure running this command only once at the beginning of the release process.
     * Usually using sonatypeBundleUpload should be sufficient, but if you need to parallelize artifact uploads, run `sonatypeOpen` before each upload to reuse the already created stging repository.
@@ -184,7 +213,7 @@ Usually, we only need to run `sonatypeBundleRelease` command in sbt-sonatype:
 * __sonatypeReleaseAll__ (sonatypeProfileName)?
   * Close and promote all staging repositories (Useful for cross-building projects)
 
-## Other Commmands
+## Other Commands
 * __sonatypeBundleClean__
   * Clean a local bundle folder
 * __sonatypeClean__
