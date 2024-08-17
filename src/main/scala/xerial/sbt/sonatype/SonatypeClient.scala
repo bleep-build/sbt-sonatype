@@ -39,7 +39,8 @@ class SonatypeClient(
       // Put the log file under target/sbt-sonatype directory
       .withLoggerConfig(_.withLogFileName("target/sbt-sonatype/sonatype_client_logs.json"))
       // Disables the circuit breaker, because Sonatype can be down for a long time https://github.com/xerial/sbt-sonatype/issues/363
-      .noCircuitBreaker.withJSONEncoding
+      .noCircuitBreaker
+      .withJSONEncoding
       // Need to set a longer timeout as Sonatype API may not respond quickly
       .withReadTimeout(Duration(timeoutMillis, TimeUnit.MILLISECONDS))
       // airframe-http will retry the request several times within this timeout duration.
@@ -138,20 +139,19 @@ class SonatypeClient(
             )
         }
       }
-      .withResultClassifier[Option[StagingActivity]] {
-        case Some(activity) if terminationCond(activity) =>
-          logger.info(s"[${taskName}] Finished successfully")
-          ResultClass.Succeeded
-        case Some(activity) if activity.containsError =>
-          logger.error(s"[${taskName}] Failed")
-          activity.reportFailure(logger)
+      .withResultClassifier[Seq[StagingActivity]] { activities =>
+        if (activities.exists(_.containsError)) {
           ResultClass.nonRetryableFailure(SonatypeException(STAGE_FAILURE, s"Failed to ${taskName} the repository."))
-        case _ =>
+        } else if (activities.exists(terminationCond)) {
+          ResultClass.Succeeded
+        } else {
           ResultClass.retryableFailure(SonatypeException(STAGE_IN_PROGRESS, s"The ${taskName} stage is in progress."))
+        }
       }
       .run {
         val activities = activitiesOf(repo)
         monitor.report(logger, activities)
+        activities
       }
 
     repo
