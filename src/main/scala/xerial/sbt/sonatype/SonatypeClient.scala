@@ -1,5 +1,6 @@
 package bleep.plugin.sonatype.sonatype
 
+import bleep.DiscardOps
 import bleep.logging.Logger
 import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.*
@@ -152,7 +153,7 @@ class SonatypeClient(
         val activities = activitiesOf(repo)
         monitor.report(logger, activities)
         activities
-      }
+      }.discard()
 
     repo
   }
