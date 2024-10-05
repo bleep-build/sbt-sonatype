@@ -1,7 +1,6 @@
 package bleep.plugin.sonatype.sonatype
 
 import bleep.DiscardOps
-import bleep.logging.Logger
 import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.*
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
@@ -9,6 +8,7 @@ import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.impl.client.BasicCredentialsProvider
 import org.sonatype.spice.zapper.ParametersBuilder
 import org.sonatype.spice.zapper.client.hc4.Hc4ClientBuilder
+import ryddig.Logger
 import wvlet.airframe.control.{Control, ResultClass, Retry}
 import wvlet.airframe.http.*
 import wvlet.airframe.http.HttpHeader.MediaType
