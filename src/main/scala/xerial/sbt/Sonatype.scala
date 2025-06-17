@@ -8,11 +8,12 @@
 package bleep
 package plugin.sonatype
 
+import bleep.DiscardOps
 import bleep.nosbt.librarymanagement.ivy.Credentials
-import bleep.plugin.sonatype.sbt.sonatype.{SonatypeCredentials}
+import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
 import bleep.plugin.sonatype.sonatype.SonatypeService.*
-import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService, SonatypeCentralClient}
+import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService, SonatypeCentralClient, SonatypeCentralService}
 import ryddig.Logger
 
 import java.net.URI
@@ -93,14 +94,7 @@ case class Sonatype(
     }
 
     val directCredentials: SonatypeCredentials =
-      SonatypeCredentials
-        .fromEnv(credential.toList, sonatypeCredentialHost)
-        .getOrElse {
-          throw SonatypeException(
-            SonatypeException.MISSING_CREDENTIAL,
-            s"No credential is found for $sonatypeCredentialHost. Prepare ~/.sbt/(sbt_version)/sonatype.sbt file."
-          )
-        }
+      SonatypeCredentials.fromEnvOrError(credential.toList, sonatypeCredentialHost)
 
     val sonatypeClient = new SonatypeClient(
       repositoryUrl = sonatypeRepository,
@@ -262,4 +256,32 @@ object Sonatype {
 
   val github = "github.com"
   val gitlab = "gitlab.com"
+
+  /** Automatic bundle release with routing based on credential host */
+  def bundleRelease(
+    logger: Logger,
+    sonatypeBundleDirectory: Path,
+    sonatypeProfileName: String,
+    bundleName: String,
+    version: String,
+    sonatypeCredentialHost: String = sonatypeLegacy
+  )(implicit ec: ExecutionContext): Unit = {
+    if (sonatypeCredentialHost == sonatypeCentralHost) {
+      // Use Central Portal API - simplified for now
+      logger.info(s"Using Sonatype Central Portal for release")
+      logger.warn("Central Portal API not fully implemented in bleep port yet")
+    } else {
+      // Use legacy OSSRH API
+      logger.info(s"Using legacy Sonatype OSSRH for release")
+      val sonatype = Sonatype(
+        logger,
+        sonatypeBundleDirectory,
+        sonatypeProfileName,
+        bundleName,
+        version,
+        sonatypeCredentialHost
+      )
+      sonatype.sonatypeBundleRelease().discard()
+    }
+  }
 }
