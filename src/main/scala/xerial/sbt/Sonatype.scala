@@ -9,12 +9,11 @@ package bleep
 package plugin.sonatype
 
 import bleep.nosbt.librarymanagement.ivy.Credentials
-import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
+import bleep.plugin.sonatype.sbt.sonatype.{SonatypeCredentials}
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
 import bleep.plugin.sonatype.sonatype.SonatypeService.*
-import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService}
+import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService, SonatypeCentralClient}
 import ryddig.Logger
-import xerial.sbt.sonatype.*
 
 import java.net.URI
 import java.nio.file.Path

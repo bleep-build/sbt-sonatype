@@ -1,7 +1,7 @@
 package bleep.plugin.sonatype.sonatype
 
 import bleep.DiscardOps
-import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
+import bleep.plugin.sonatype.sbt.sonatype.{SonatypeCredentials}
 import bleep.plugin.sonatype.sonatype.SonatypeClient.*
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STAGE_FAILURE, STAGE_IN_PROGRESS}
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
@@ -17,6 +17,7 @@ import wvlet.airframe.http.HttpMessage.Response
 import java.io.{File, IOException}
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import scala.annotation.nowarn
 import scala.concurrent.duration.Duration
 
 /** REST API Client for Sonatype API (nexus-staging) https://repository.sonatype.org/nexus-staging-plugin/default/docs/rest.html
@@ -34,11 +35,10 @@ class SonatypeClient(
 
   private val pathPrefix = repoUri.getPath
 
-  private[sonatype] val clientConfig =
-    Http.client
+  @nowarn("msg=URLConnectionClientBackend")
+  private[sonatype] val clientConfig = {
+    var config = Http.client
       .withName("sonatype-client")
-      // Put the log file under target/sbt-sonatype directory
-      .withLoggerConfig(_.withLogFileName("target/sbt-sonatype/sonatype_client_logs.json"))
       // Disables the circuit breaker, because Sonatype can be down for a long time https://github.com/xerial/sbt-sonatype/issues/363
       .noCircuitBreaker
       .withJSONEncoding
@@ -56,6 +56,21 @@ class SonatypeClient(
           .withAccept(MediaType.ApplicationJson)
           .withHeader(HttpHeader.Authorization, s"Basic ${base64Credentials}")
       }
+
+    val javaVersion = sys.props.getOrElse("java.version", "unknown")
+    if (javaVersion.startsWith("1.")) {
+      logger.warn(
+        s"Disabled http client logging as Java version ${javaVersion} is no longer supported. Please use Java 17 or later."
+      )
+      config = config.noLogging
+    } else {
+      // Put the log file under target/sbt-sonatype directory
+      config = config.withLoggerConfig {
+        _.withLogFileName("target/sbt-sonatype/sonatype_client_logs.json")
+      }
+    }
+    config
+  }
 
   private[sonatype] val httpClient = clientConfig.newSyncClient(repoUri.toString)
 
@@ -116,7 +131,7 @@ class SonatypeClient(
     // init * (multiplier ^ n) = max
     // n = log(max / init) / log(multiplier)
     val retryCountUntilMaxInterval = (math.log(maxInterval.toDouble / initInterval) / math.log(1.5)).toInt.max(1)
-    val numRetry = (timeoutMillis.toFloat / maxInterval).ceil.toInt
+    val numRetry = (timeoutMillis / maxInterval).toDouble.ceil.toInt
     Retry.withBackOff(
       maxRetry = retryCountUntilMaxInterval + numRetry,
       initialIntervalMillis = initInterval,
@@ -252,6 +267,12 @@ class SonatypeClient(
         credentialProvider.setCredentials(AuthScope.ANY, usernamePasswordCredentials)
 
         clientBuilder.withPreemptiveRealm(credentialProvider)
+
+        if (!localBundlePath.isDirectory) {
+          logger.info(
+            s"Directory $localBundlePath does not exist. Hint: Make sure you don't have any uncommitted files (i.e. generated via plugins like scalafmt)"
+          )
+        }
 
         import org.sonatype.spice.zapper.fs.DirectoryIOSource
         val deployables = new DirectoryIOSource(localBundlePath)

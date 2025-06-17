@@ -3,13 +3,12 @@ package bleep.plugin.sonatype.sbt.sonatype
 import bleep.nosbt.librarymanagement.ivy.Credentials
 import bleep.plugin.sonatype.sonatype.SonatypeException
 import bleep.plugin.sonatype.sonatype.SonatypeException.MISSING_CREDENTIAL
-import bleep.plugin.sonatype.sonatype.utils.Extensions.*
-import com.lumidion.sonatype.central.client.core.SonatypeCredentials as SonatypeCentralCredentials
+import com.lumidion.sonatype.central.client.core.{SonatypeCredentials => SonatypeCentralCredentials}
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
-final case class SonatypeCredentials private (userName: String, password: String) {
+private[sonatype] final case class SonatypeCredentials private (userName: String, password: String) {
   override def toString: String = "SonatypeCredentials(userName: <redacted>, password: <redacted>)"
 
   def toBase64: String = Base64.getEncoder.encodeToString(s"${userName}:${password}".getBytes(StandardCharsets.UTF_8))
@@ -34,5 +33,8 @@ object SonatypeCredentials {
   }
 
   def fromEnvOrError(credentials: Seq[Credentials], credentialHost: String): SonatypeCredentials =
-    fromEnv(credentials, credentialHost).getOrError
+    fromEnv(credentials, credentialHost) match {
+      case Left(ex) => throw ex
+      case Right(creds) => creds
+    }
 }

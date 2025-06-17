@@ -118,7 +118,7 @@ class SonatypeService(
     myProfiles
   }
 
-  private def withCache[A: MessageCodec](label: String, fileName: String, a: => A): A = {
+  private def withCache[A](label: String, fileName: String, a: => A)(implicit codec: MessageCodec[A]): A = {
     val cachedir = (Vector("sbt", "sonatype") ++ cacheToken).mkString("-")
     val cacheRoot = new File(s"target/${cachedir}")
     val cacheFile = new File(cacheRoot, fileName)

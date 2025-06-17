@@ -1,24 +1,23 @@
-package xerial.sbt.sonatype
+package bleep.plugin.sonatype.sonatype
 
-import bleep.plugin.sonatype.sonatype.SonatypeException
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_ZIP_ERROR, STAGE_FAILURE}
 import bleep.plugin.sonatype.sonatype.utils.Extensions.*
 import com.lumidion.sonatype.central.client.core.{DeploymentName, PublishingType}
-import wvlet.log.LogSupport
+import ryddig.Logger
 
 import java.io.{File, FileInputStream, FileOutputStream}
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, Paths}
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.util.Try
 
-private[sbt] class SonatypeCentralService(client: SonatypeCentralClient) extends LogSupport {
+private[sonatype] class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
 
   def uploadBundle(
       localBundlePath: File,
       deploymentName: DeploymentName,
       publishingType: PublishingType
   ): Either[SonatypeException, Unit] = for {
-    bundleZipDirectory <- Try(Files.createDirectory(Path.of(s"${localBundlePath.getPath}-bundle"))).toEither.leftMap {
+    bundleZipDirectory <- Try(Files.createDirectory(Paths.get(s"${localBundlePath.getPath}-bundle"))).toEither.leftMap {
       err =>
         SonatypeException(BUNDLE_ZIP_ERROR, s"Error creating bundle zip directory. ${err.getMessage}")
     }
@@ -26,7 +25,7 @@ private[sbt] class SonatypeCentralService(client: SonatypeCentralClient) extends
       SonatypeException(BUNDLE_ZIP_ERROR, err.getMessage)
     }
     deploymentId <- client.uploadBundle(zipFile, deploymentName, Some(publishingType))
-    _ = info(s"Checking if deployment succeeded for deployment id: ${deploymentId.unapply}...")
+    _ = logger.info(s"Checking if deployment succeeded for deployment id: ${deploymentId.unapply}...")
     didDeploySucceed <- client.didDeploySucceed(deploymentId, publishingType == PublishingType.AUTOMATIC)
     _ <- Either.cond(
       didDeploySucceed,

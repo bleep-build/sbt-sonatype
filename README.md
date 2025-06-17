@@ -75,6 +75,10 @@ import xerial.sbt.Sonatype.sonatypeCentralHost
 
 ThisBuild / sonatypeCredentialHost := sonatypeCentralHost
 ```
+Note: if you are publishing an sbt plugin you will also need to configure `sbtPluginPublishLegacyMavenStyle := false` for that project. 
+Context: sbt publishes plugins with file names that do not conform to the maven specification. Sonatype OSSRH didn't validate this, but Sonatype Central does: `File name 'sbt-my-plugin-0.0.1.jar' is not valid`. 
+See also: https://github.com/sbt/sbt/issues/3410
+
 
 #### Usage
 
@@ -116,13 +120,13 @@ sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
 
 ### $HOME/.sbt/(sbt-version 0.13 or 1.0)/sonatype.sbt
 
-For the authentication to Sonatype API, you need to set your Sonatype account information (user name and password) in the global sbt settings. To protect your password, never include this file within your project.
+For the authentication to Sonatype API, you need to set your Sonatype token information (name and password) in the global sbt settings. To protect your password, never include this file within your project. Get the token from https://oss.sonatype.org or https://s01.oss.sonatype.org.
 
 ```scala
 credentials += Credentials("Sonatype Nexus Repository Manager",
         "oss.sonatype.org",
-        "(Sonatype user name)",
-        "(Sonatype password)")
+        "(Sonatype token user name)",
+        "(Sonatype token password)")
 ```
 
 ### (project root)/sonatype.sbt

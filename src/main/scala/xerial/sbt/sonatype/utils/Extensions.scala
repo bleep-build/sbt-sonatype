@@ -2,7 +2,7 @@ package bleep.plugin.sonatype.sonatype.utils
 
 import bleep.plugin.sonatype.sonatype.SonatypeException
 
-object Extensions {
+private[sonatype] object Extensions {
   implicit class EitherOps[A, B](either: Either[A, B]) {
     def leftMap[C](func: A => C): Either[C, B] = either match {
       case Left(left)   => Left(func(left))
