@@ -192,115 +192,163 @@ case class Sonatype(
 
   /* Clean (if exists) and create a staging repository for releasing the current version, then update publishTo */
   def sonatypePrepare(): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      prepare(rest)
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        prepare(rest)
+      }
     }
 
   /* Open (or create if not exists) to a staging repository for the current version, then update publishTo */
   def sonatypeOpen(): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      // Re-open or create a staging repository
-      val repo = rest.openOrCreateByKey(sonatypeSessionName)
-      repo
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        // Re-open or create a staging repository
+        val repo = rest.openOrCreateByKey(sonatypeSessionName)
+        repo
+      }
     }
 
   def sonatypeClose(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
-      val repo1 = rest.findTargetRepository(Close, repoID)
-      val repo2 = rest.closeStage(repo1)
-      repo2
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+        val repo1 = rest.findTargetRepository(Close, repoID)
+        val repo2 = rest.closeStage(repo1)
+        repo2
+      }
     }
 
   /* Promote a staging repository */
   def sonatypePromote(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
-      val repo1 = rest.findTargetRepository(Promote, repoID)
-      val repo2 = rest.promoteStage(repo1)
-      repo2
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+        val repo1 = rest.findTargetRepository(Promote, repoID)
+        val repo2 = rest.promoteStage(repo1)
+        repo2
+      }
     }
 
   /* Drop a staging repository */
   def sonatypeDrop(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
-      val repo1 = rest.findTargetRepository(Drop, repoID)
-      val repo2 = rest.dropStage(repo1)
-      repo2
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+        val repo1 = rest.findTargetRepository(Drop, repoID)
+        val repo2 = rest.dropStage(repo1)
+        repo2
+      }
     }
 
   /* Publish with sonatypeClose and sonatypePromote */
   def sonatypeRelease(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
-    withSonatypeService { rest =>
-      val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
-      val repo1 = rest.findTargetRepository(CloseAndPromote, repoID)
-      val repo2 = rest.closeAndPromote(repo1)
-      repo2
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal. Use sonatypeBundleRelease or sonatypeCentralRelease instead.")
+    } else {
+      withSonatypeService { rest =>
+        val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
+        val repo1 = rest.findTargetRepository(CloseAndPromote, repoID)
+        val repo2 = rest.closeAndPromote(repo1)
+        repo2
+      }
     }
 
   /* Clean a staging repository for the current version if it exists */
   def sonatypeClean(): Unit =
-    withSonatypeService { rest =>
-      val descriptionKey = sonatypeSessionName
-      rest.dropIfExistsByKey(descriptionKey).discard()
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging repository cleanup is not applicable to Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val descriptionKey = sonatypeSessionName
+        rest.dropIfExistsByKey(descriptionKey).discard()
+      }
     }
 
   /* Publish all staging repositories to Maven central */
   def sonatypeReleaseAll(): Unit =
-    withSonatypeService { rest =>
-      val tasks = rest.stagingRepositoryProfiles().map { repo =>
-        Future(rest.closeAndPromote(repo))
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val tasks = rest.stagingRepositoryProfiles().map { repo =>
+          Future(rest.closeAndPromote(repo))
+        }
+        val merged = Future.sequence(tasks)
+        Await.result(merged, Duration.Inf).discard()
       }
-      val merged = Future.sequence(tasks)
-      Await.result(merged, Duration.Inf).discard()
     }
 
   /* Drop all staging repositories */
   def sonatypeDropAll(): Unit =
-    withSonatypeService { rest =>
-      val dropTasks = rest.stagingRepositoryProfiles().map { repo =>
-        Future(rest.dropStage(repo))
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging repositories are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val dropTasks = rest.stagingRepositoryProfiles().map { repo =>
+          Future(rest.dropStage(repo))
+        }
+        val merged = Future.sequence(dropTasks)
+        Await.result(merged, Duration.Inf).discard()
       }
-      val merged = Future.sequence(dropTasks)
-      Await.result(merged, Duration.Inf).discard()
     }
 
   /* Show staging activity logs at Sonatype */
   def sonatypeLog(): Unit =
-    withSonatypeService { rest =>
-      val alist = rest.activities
-      if (alist.isEmpty)
-        logger.warn("No staging log is found")
-      for ((repo, activities) <- alist) {
-        logger.info(s"Staging activities of $repo:")
-        for (a <- activities)
-          a.showProgress(logger)
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging activity logs are not available with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val alist = rest.activities
+        if (alist.isEmpty)
+          logger.warn("No staging log is found")
+        for ((repo, activities) <- alist) {
+          logger.info(s"Staging activities of $repo:")
+          for (a <- activities)
+            a.showProgress(logger)
+        }
+        ()
       }
-      ()
     }
 
   /* Show the list of staging repository profiles */
   def sonatypeStagingRepositoryProfiles(): Unit =
-    withSonatypeService { rest =>
-      val repos = rest.stagingRepositoryProfiles()
-      if (repos.isEmpty)
-        logger.warn(s"No staging repository is found for ${rest.profileName}")
-      else {
-        logger.info(s"Staging repository profiles (sonatypeProfileName:${rest.profileName}):")
-        logger.info(repos.mkString("\n"))
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging repository profiles are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val repos = rest.stagingRepositoryProfiles()
+        if (repos.isEmpty)
+          logger.warn(s"No staging repository is found for ${rest.profileName}")
+        else {
+          logger.info(s"Staging repository profiles (sonatypeProfileName:${rest.profileName}):")
+          logger.info(repos.mkString("\n"))
+        }
       }
     }
 
   /* Show the list of staging profiles */
   def sonatypeStagingProfiles(): Unit =
-    withSonatypeService { rest =>
-      val profiles = rest.stagingProfiles
-      if (profiles.isEmpty)
-        logger.warn(s"No staging profile is found for ${rest.profileName}")
-      else {
-        logger.info(s"Staging profiles (sonatypeProfileName:${rest.profileName}):")
-        logger.info(profiles.mkString("\n"))
+    if (sonatypeCredentialHost == SonatypeCentralClient.host) {
+      logger.info("Staging profiles are not used with Sonatype Central Portal")
+    } else {
+      withSonatypeService { rest =>
+        val profiles = rest.stagingProfiles
+        if (profiles.isEmpty)
+          logger.warn(s"No staging profile is found for ${rest.profileName}")
+        else {
+          logger.info(s"Staging profiles (sonatypeProfileName:${rest.profileName}):")
+          logger.info(profiles.mkString("\n"))
+        }
       }
     }
 
