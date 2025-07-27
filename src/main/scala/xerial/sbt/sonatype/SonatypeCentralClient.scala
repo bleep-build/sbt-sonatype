@@ -26,7 +26,7 @@ import sttp.model.StatusCode
 
 import java.io.File
 
-private[sonatype] class SonatypeCentralClient(
+class SonatypeCentralClient(
     client: SyncSonatypeClient,
     readTimeoutMillis: Long,
     logger: Logger

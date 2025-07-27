@@ -10,7 +10,7 @@ import java.nio.file.{Files, Path, Paths}
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.util.Try
 
-private[sonatype] class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
+class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
 
   def uploadBundle(
       localBundlePath: File,
