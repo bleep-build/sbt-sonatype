@@ -13,7 +13,7 @@ import bleep.nosbt.librarymanagement.ivy.Credentials
 import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeClient.StagingRepositoryProfile
 import bleep.plugin.sonatype.sonatype.SonatypeService.*
-import bleep.plugin.sonatype.sonatype.{SonatypeClient, SonatypeException, SonatypeService, SonatypeCentralClient, SonatypeCentralService}
+import bleep.plugin.sonatype.sonatype.{SonatypeCentralClient, SonatypeClient, SonatypeService}
 import ryddig.Logger
 
 import java.net.URI
@@ -31,8 +31,7 @@ case class Sonatype(
     sonatypeProfileName: String,
     bundleName: String,
     version: String,
-    /* Credential host. Default is oss.sonatype.org */
-    sonatypeCredentialHost: String = Sonatype.sonatypeLegacy
+    sonatypeCredentialHost: String = SonatypeCentralClient.host
 )(implicit ec: ExecutionContext = ExecutionContext.global) {
   /* Sonatype repository URL: e.g. https://oss.sonatype.org/service/local */
   lazy val sonatypeRepository: String = s"https://$sonatypeCredentialHost/service/local"
@@ -252,20 +251,20 @@ object Sonatype {
   val sonatypeLegacy = "oss.sonatype.org"
   val sonatype01 = "s01.oss.sonatype.org"
   val sonatypeCentralHost = SonatypeCentralClient.host
-  val knownOssHosts       = Seq(sonatypeLegacy, sonatype01)
+  val knownOssHosts = Seq(sonatypeLegacy, sonatype01)
 
   val github = "github.com"
   val gitlab = "gitlab.com"
 
   /** Automatic bundle release with routing based on credential host */
   def bundleRelease(
-    logger: Logger,
-    sonatypeBundleDirectory: Path,
-    sonatypeProfileName: String,
-    bundleName: String,
-    version: String,
-    sonatypeCredentialHost: String = sonatypeLegacy
-  )(implicit ec: ExecutionContext): Unit = {
+      logger: Logger,
+      sonatypeBundleDirectory: Path,
+      sonatypeProfileName: String,
+      bundleName: String,
+      version: String,
+      sonatypeCredentialHost: String = sonatypeLegacy
+  )(implicit ec: ExecutionContext): Unit =
     if (sonatypeCredentialHost == sonatypeCentralHost) {
       // Use Central Portal API - simplified for now
       logger.info(s"Using Sonatype Central Portal for release")
@@ -283,5 +282,4 @@ object Sonatype {
       )
       sonatype.sonatypeBundleRelease().discard()
     }
-  }
 }
