@@ -8,6 +8,7 @@ import com.lumidion.sonatype.central.client.core.{SonatypeCredentials => Sonatyp
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
+@scala.annotation.nowarn("cat=scala3-migration")
 final case class SonatypeCredentials private (userName: String, password: String) {
   override def toString: String = "SonatypeCredentials(userName: <redacted>, password: <redacted>)"
 
