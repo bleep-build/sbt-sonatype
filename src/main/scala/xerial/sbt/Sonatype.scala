@@ -54,19 +54,19 @@ case class Sonatype(
     // Sonatype snapshot repositories have no support for bundle upload,
     // so use direct publishing to the snapshot repo.
     if (version.endsWith("-SNAPSHOT")) sonatypeSnapshotResolver
-    else model.Repository.MavenFolder(Some("sonatype-local-bundle"), sonatypeBundleDirectory)
+    else model.Repository.MavenFolder(Some(model.ResolverName("sonatype-local-bundle")), sonatypeBundleDirectory)
 
   /* Sonatype snapshot resolver */
   lazy val sonatypeSnapshotResolver =
     model.Repository.Maven(
-      Some(s"${sonatypeCredentialHost.replace('.', '-')}-snapshots"),
+      Some(model.ResolverName(s"${sonatypeCredentialHost.replace('.', '-')}-snapshots")),
       new URI(s"https://$sonatypeCredentialHost/content/repositories/snapshots")
     )
 
   /* Sonatype staging resolver */
   lazy val sonatypeStagingResolver =
     model.Repository.Maven(
-      Some(s"${sonatypeCredentialHost.replace('.', '-')}-staging"),
+      Some(model.ResolverName(s"${sonatypeCredentialHost.replace('.', '-')}-staging")),
       new URI(s"https://$sonatypeCredentialHost/service/local/staging/deploy/maven2")
     )
 
