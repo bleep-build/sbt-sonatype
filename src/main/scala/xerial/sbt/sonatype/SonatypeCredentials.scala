@@ -8,7 +8,6 @@ import com.lumidion.sonatype.central.client.core.{SonatypeCredentials => Sonatyp
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
-@scala.annotation.nowarn("cat=scala3-migration")
 final case class SonatypeCredentials private (userName: String, password: String) {
   override def toString: String = "SonatypeCredentials(userName: <redacted>, password: <redacted>)"
 
@@ -21,7 +20,7 @@ object SonatypeCredentials {
   def fromEnv(
       credentials: Seq[Credentials],
       credentialHost: String
-  ): Either[SonatypeException, SonatypeCredentials] = {
+  ): Either[SonatypeException, SonatypeCredentials] =
     Credentials
       .forHost(credentials, credentialHost)
       .toRight {
@@ -31,11 +30,10 @@ object SonatypeCredentials {
         )
       }
       .map(directCredentials => SonatypeCredentials(directCredentials.userName, directCredentials.passwd))
-  }
 
   def fromEnvOrError(credentials: Seq[Credentials], credentialHost: String): SonatypeCredentials =
     fromEnv(credentials, credentialHost) match {
-      case Left(ex) => throw ex
+      case Left(ex)     => throw ex
       case Right(creds) => creds
     }
 }

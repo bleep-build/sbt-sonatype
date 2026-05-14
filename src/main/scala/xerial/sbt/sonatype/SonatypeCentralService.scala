@@ -17,9 +17,8 @@ class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
       deploymentName: DeploymentName,
       publishingType: PublishingType
   ): Either[SonatypeException, Unit] = for {
-    bundleZipDirectory <- Try(Files.createDirectory(Paths.get(s"${localBundlePath.getPath}-bundle"))).toEither.leftMap {
-      err =>
-        SonatypeException(BUNDLE_ZIP_ERROR, s"Error creating bundle zip directory. ${err.getMessage}")
+    bundleZipDirectory <- Try(Files.createDirectory(Paths.get(s"${localBundlePath.getPath}-bundle"))).toEither.leftMap { err =>
+      SonatypeException(BUNDLE_ZIP_ERROR, s"Error creating bundle zip directory. ${err.getMessage}")
     }
     zipFile <- Try(zipDirectory(localBundlePath, bundleZipDirectory)).toEither.leftMap { err =>
       SonatypeException(BUNDLE_ZIP_ERROR, err.getMessage)
@@ -39,8 +38,8 @@ class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
 
   private def zipDirectory(localBundlePath: File, bundleZipDirPath: Path): File = {
     val outputZipFilePath = s"${bundleZipDirPath.toFile.getPath}/bundle.zip"
-    val fileOutputStream  = new FileOutputStream(outputZipFilePath)
-    val zipOutputStream   = new ZipOutputStream(fileOutputStream)
+    val fileOutputStream = new FileOutputStream(outputZipFilePath)
+    val zipOutputStream = new ZipOutputStream(fileOutputStream)
     zipFile(localBundlePath, localBundlePath.getName, zipOutputStream, isDirTopLevel = true)
     zipOutputStream.close()
     fileOutputStream.close()
@@ -64,19 +63,17 @@ class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
       val directoryPath = if (isDirTopLevel) {
         ""
       } else fileName + "/"
-      for (childFile <- children) {
+      for (childFile <- children)
         zipFile(childFile, directoryPath + childFile.getName, zipOut, isDirTopLevel = false)
-      }
       return
     }
     val fileInputStream = new FileInputStream(fileToZip)
-    val zipEntry        = new ZipEntry(fileName)
+    val zipEntry = new ZipEntry(fileName)
     zipOut.putNextEntry(zipEntry)
-    val bytes  = new Array[Byte](1024)
+    val bytes = new Array[Byte](1024)
     var length = 0
-    while ({ length = fileInputStream.read(bytes); length } >= 0) {
+    while ({ length = fileInputStream.read(bytes); length } >= 0)
       zipOut.write(bytes, 0, length)
-    }
     fileInputStream.close()
   }
 }

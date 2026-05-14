@@ -168,7 +168,8 @@ class SonatypeClient(
         val activities = activitiesOf(repo)
         monitor.report(logger, activities)
         activities
-      }.discard()
+      }
+      .discard()
 
     repo
   }
@@ -282,8 +283,7 @@ class SonatypeClient(
           logger.info(s"Uploading bundle ${localBundlePath} to ${endpoint}")
           client.upload(deployables)
           logger.info(s"Finished bundle upload: ${localBundlePath}")
-        } finally
-          client.close()
+        } finally client.close()
       }
 
 }

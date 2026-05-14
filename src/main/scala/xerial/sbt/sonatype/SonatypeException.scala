@@ -33,9 +33,9 @@ object SonatypeException {
   case object MISSING_STAGING_PROFILE extends ErrorCode
 
   case class MISSING_PROFILE(profileName: String, host: String) extends ErrorCode {
-    def problem                               = s"Profile ${profileName} is not found on ${host}"
+    def problem = s"Profile ${profileName} is not found on ${host}"
     def possibleAlternativeHosts: Seq[String] = Sonatype.knownOssHosts.filterNot(_ == host)
-    def hostAdvice                            = s"try ${possibleAlternativeHosts.mkString(", or ")}?"
+    def hostAdvice = s"try ${possibleAlternativeHosts.mkString(", or ")}?"
     def advice: String =
       s"In your sbt settings, check your sonatypeProfileName and sonatypeCredentialHost ($hostAdvice)"
 

@@ -115,7 +115,7 @@ case class Sonatype(
 
   def withSonatypeCentralService[T](body: SonatypeCentralService => Either[SonatypeException, T]): Either[SonatypeException, T] = {
     val credentials = credential.toList
-    
+
     for {
       client <- SonatypeCentralClient.fromCredentials(
         credentials,
@@ -123,13 +123,13 @@ case class Sonatype(
         logger
       )
       service = new SonatypeCentralService(client, logger)
-      res <- try {
-        body(service)
-      } catch {
-        case e: Throwable => Left(new SonatypeException(GENERIC_ERROR, e.getMessage))
-      } finally {
-        client.close()
-      }
+      res <-
+        try
+          body(service)
+        catch {
+          case e: Throwable => Left(new SonatypeException(GENERIC_ERROR, e.getMessage))
+        } finally
+          client.close()
     } yield res
   }
 
@@ -141,7 +141,7 @@ case class Sonatype(
       val result = sonatypeCentralRelease(deploymentName)
       result match {
         case Left(ex) => throw ex
-        case Right(_) => 
+        case Right(_) =>
           // Return a dummy profile for Central Portal
           StagingRepositoryProfile(
             profileId = sonatypeProfileName,
@@ -169,7 +169,7 @@ case class Sonatype(
       val result = sonatypeCentralUpload(deploymentName)
       result match {
         case Left(ex) => throw ex
-        case Right(_) => 
+        case Right(_) =>
           // Return a dummy profile for Central Portal
           StagingRepositoryProfile(
             profileId = sonatypeProfileName,
@@ -253,7 +253,9 @@ case class Sonatype(
   /* Publish with sonatypeClose and sonatypePromote */
   def sonatypeRelease(sonatypeTargetRepositoryProfile: Option[StagingRepositoryProfile]): StagingRepositoryProfile =
     if (sonatypeCredentialHost == SonatypeCentralClient.host) {
-      throw new UnsupportedOperationException("Staging repositories are not used with Sonatype Central Portal. Use sonatypeBundleRelease or sonatypeCentralRelease instead.")
+      throw new UnsupportedOperationException(
+        "Staging repositories are not used with Sonatype Central Portal. Use sonatypeBundleRelease or sonatypeCentralRelease instead."
+      )
     } else {
       withSonatypeService { rest =>
         val repoID = sonatypeTargetRepositoryProfile.map(_.repositoryId)
@@ -353,13 +355,15 @@ case class Sonatype(
     }
 
   /* Upload bundle to Sonatype Central with user-managed publishing */
-  def sonatypeCentralUpload(deploymentName: String = s"$sonatypeProfileName.$bundleName-$version"): Either[SonatypeException, Unit] = 
+  def sonatypeCentralUpload(deploymentName: String = s"$sonatypeProfileName.$bundleName-$version"): Either[SonatypeException, Unit] =
     if (sonatypeCredentialHost == SonatypeCentralClient.host) {
       if (version.endsWith("-SNAPSHOT")) {
-        Left(new SonatypeException(
-          SonatypeException.USER_ERROR,
-          "Version cannot be a snapshot version when deploying to sonatype central. Please ensure that the version is publishable and try again."
-        ))
+        Left(
+          new SonatypeException(
+            SonatypeException.USER_ERROR,
+            "Version cannot be a snapshot version when deploying to sonatype central. Please ensure that the version is publishable and try again."
+          )
+        )
       } else {
         withSonatypeCentralService { service =>
           service.uploadBundle(
@@ -370,20 +374,24 @@ case class Sonatype(
         }
       }
     } else {
-      Left(new SonatypeException(
-        SonatypeException.USER_ERROR,
-        s"sonatypeCredentialHost key needs to be set to ${SonatypeCentralClient.host} in order to release to sonatype central. Please adjust the key and try again."
-      ))
+      Left(
+        new SonatypeException(
+          SonatypeException.USER_ERROR,
+          s"sonatypeCredentialHost key needs to be set to ${SonatypeCentralClient.host} in order to release to sonatype central. Please adjust the key and try again."
+        )
+      )
     }
 
   /* Upload bundle to Sonatype Central with automatic publishing */
-  def sonatypeCentralRelease(deploymentName: String = s"$sonatypeProfileName.$bundleName-$version"): Either[SonatypeException, Unit] = 
+  def sonatypeCentralRelease(deploymentName: String = s"$sonatypeProfileName.$bundleName-$version"): Either[SonatypeException, Unit] =
     if (sonatypeCredentialHost == SonatypeCentralClient.host) {
       if (version.endsWith("-SNAPSHOT")) {
-        Left(new SonatypeException(
-          SonatypeException.USER_ERROR,
-          "Version cannot be a snapshot version when deploying to sonatype central. Please ensure that the version is publishable and try again."
-        ))
+        Left(
+          new SonatypeException(
+            SonatypeException.USER_ERROR,
+            "Version cannot be a snapshot version when deploying to sonatype central. Please ensure that the version is publishable and try again."
+          )
+        )
       } else {
         withSonatypeCentralService { service =>
           service.uploadBundle(
@@ -394,10 +402,12 @@ case class Sonatype(
         }
       }
     } else {
-      Left(new SonatypeException(
-        SonatypeException.USER_ERROR,
-        s"sonatypeCredentialHost key needs to be set to ${SonatypeCentralClient.host} in order to release to sonatype central. Please adjust the key and try again."
-      ))
+      Left(
+        new SonatypeException(
+          SonatypeException.USER_ERROR,
+          s"sonatypeCredentialHost key needs to be set to ${SonatypeCentralClient.host} in order to release to sonatype central. Please adjust the key and try again."
+        )
+      )
     }
 }
 
@@ -424,12 +434,12 @@ object Sonatype {
     if (sonatypeCredentialHost == sonatypeCentralHost) {
       // Use Central Portal API
       logger.info(s"Using Sonatype Central Portal for release")
-      
+
       if (version.endsWith("-SNAPSHOT")) {
         logger.error("Version cannot be a snapshot version when deploying to Sonatype Central. Please ensure that the version is publishable and try again.")
         throw new Exception("Cannot deploy SNAPSHOT versions to Sonatype Central")
       }
-      
+
       val sonatype = Sonatype(
         logger,
         sonatypeBundleDirectory,
@@ -438,9 +448,9 @@ object Sonatype {
         version,
         sonatypeCredentialHost
       )
-      
+
       val deploymentName = DeploymentName(s"${sonatypeProfileName}.${bundleName}-${version}")
-      
+
       val result = sonatype.withSonatypeCentralService { service =>
         service.uploadBundle(
           sonatypeBundleDirectory.toFile,
@@ -448,7 +458,7 @@ object Sonatype {
           PublishingType.AUTOMATIC
         )
       }
-      
+
       result match {
         case Left(ex) => throw ex
         case Right(_) => logger.info("Successfully uploaded bundle to Sonatype Central for automatic release")

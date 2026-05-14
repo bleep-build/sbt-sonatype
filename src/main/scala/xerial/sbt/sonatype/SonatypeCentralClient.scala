@@ -2,13 +2,7 @@ package bleep.plugin.sonatype.sonatype
 
 import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
 import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STATUS_CHECK_FAILURE, USER_ERROR}
-import com.lumidion.sonatype.central.client.core.{
-  CheckStatusResponse,
-  DeploymentId,
-  DeploymentName,
-  DeploymentState,
-  PublishingType
-}
+import com.lumidion.sonatype.central.client.core.{CheckStatusResponse, DeploymentId, DeploymentName, DeploymentState, PublishingType}
 import com.lumidion.sonatype.central.client.core.DeploymentState.PUBLISHED
 import com.lumidion.sonatype.central.client.sttp.core.SyncSonatypeClient
 import com.lumidion.sonatype.central.client.upickle.decoders.*
@@ -38,21 +32,20 @@ class SonatypeCentralClient(
       errorCode: ErrorCode,
       retriesLeft: Int,
       retriesAttempted: Int = 0
-  ): Either[SonatypeException, A] = {
+  ): Either[SonatypeException, A] =
     for {
       response <- Try(request).toEither.leftMap { err =>
         SonatypeException(errorCode, s"$errorContext. ${err.getMessage}")
       }
       finalResponse <- response match {
-        case Left(HttpError(message, code))
-            if (code == StatusCode.Forbidden) || (code == StatusCode.Unauthorized) || (code == StatusCode.BadRequest) =>
+        case Left(HttpError(message, code)) if (code == StatusCode.Forbidden) || (code == StatusCode.Unauthorized) || (code == StatusCode.BadRequest) =>
           Left(
             new SonatypeException(USER_ERROR, s"$errorContext. Status code: ${code.code}. Message Received: $message")
           )
         case Left(ex) =>
           if (retriesLeft > 0) {
-            val exponent                   = pow(5, retriesAttempted).toInt
-            val maximum                    = 30000
+            val exponent = pow(5, retriesAttempted).toInt
+            val maximum = 30000
             val initialMillisecondsToSleep = 1500 + exponent
             val finalMillisecondsToSleep = if (maximum < initialMillisecondsToSleep) {
               maximum
@@ -66,7 +59,6 @@ class SonatypeCentralClient(
         case Right(res) => Right(res)
       }
     } yield finalResponse
-  }
   def uploadBundle(
       localBundlePath: File,
       deploymentName: DeploymentName,
@@ -85,7 +77,7 @@ class SonatypeCentralClient(
   def didDeploySucceed(
       deploymentId: DeploymentId,
       shouldDeployBePublished: Boolean
-  ): Either[SonatypeException, Boolean] = {
+  ): Either[SonatypeException, Boolean] =
 
     for {
       response <- retryRequest(
@@ -113,7 +105,6 @@ class SonatypeCentralClient(
           Right(true)
         }
     } yield finalRes
-  }
 
   override def close(): Unit = client.close()
 }
