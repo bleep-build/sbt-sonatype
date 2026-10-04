@@ -1,7 +1,7 @@
 package bleep.plugin.sonatype.sonatype
 
 import bleep.plugin.sonatype.sbt.sonatype.SonatypeCredentials
-import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, STATUS_CHECK_FAILURE, USER_ERROR}
+import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_UPLOAD_FAILURE, JSON_PARSING_ERROR, STAGE_FAILURE, STATUS_CHECK_FAILURE, USER_ERROR}
 import com.lumidion.sonatype.central.client.core.{CheckStatusResponse, DeploymentId, DeploymentName, DeploymentState, PublishingType}
 import com.lumidion.sonatype.central.client.core.DeploymentState.PUBLISHED
 import com.lumidion.sonatype.central.client.sttp.core.SyncSonatypeClient
@@ -11,7 +11,7 @@ import bleep.nosbt.librarymanagement.ivy.Credentials
 import ryddig.Logger
 import scala.math.pow
 import scala.util.Try
-import sttp.client4.{HttpError, ResponseException}
+import sttp.client4.{HttpError, ResponseException, SyncBackend}
 import sttp.client4.httpurlconnection.HttpURLConnectionBackend
 import sttp.client4.logging.slf4j.Slf4jLoggingBackend
 import sttp.client4.logging.LoggingOptions
@@ -22,6 +22,7 @@ import java.io.File
 
 class SonatypeCentralClient(
     client: SyncSonatypeClient,
+    backend: SyncBackend,
     readTimeoutMillis: Long,
     logger: Logger
 ) extends AutoCloseable {
@@ -74,35 +75,46 @@ class SonatypeCentralClient(
     )
   }
 
-  def didDeploySucceed(
+  /** Polls the deployment until it reaches a final state. A FAILED deployment is an error which carries what Central found wrong with each component: the
+    * status response lists it under `errors`, which the client library's `CheckStatusResponse` does not decode, so the response is read as JSON here.
+    */
+  def awaitDeployment(
       deploymentId: DeploymentId,
       shouldDeployBePublished: Boolean
-  ): Either[SonatypeException, Boolean] =
-
+  ): Either[SonatypeException, Unit] =
     for {
-      response <- retryRequest(
-        client.checkStatus(deploymentId, timeout = readTimeoutMillis)(asJson[CheckStatusResponse]).body,
+      json <- retryRequest(
+        client
+          .checkStatusRequest(deploymentId, timeout = readTimeoutMillis)(asJson[CheckStatusResponse])
+          .response(asJson[ujson.Value])
+          .send(backend)
+          .body,
         "Error checking deployment status",
         STATUS_CHECK_FAILURE,
         10
       )
+      response <- Try(upickle.default.read[CheckStatusResponse](json)).toEither.leftMap { err =>
+        SonatypeException(JSON_PARSING_ERROR, s"Could not read deployment status ${ujson.write(json)}. ${err.getMessage}")
+      }
       finalRes <-
         if (response.deploymentState.isNonFinal) {
           Thread.sleep(5000L)
-          didDeploySucceed(deploymentId, shouldDeployBePublished)
+          awaitDeployment(deploymentId, shouldDeployBePublished)
         } else if (response.deploymentState == DeploymentState.FAILED) {
-          logger.error(
-            s"Deployment failed for deployment id: ${deploymentId.unapply}. Current deployment state: ${response.deploymentState.unapply}"
+          Left(
+            SonatypeException(
+              STAGE_FAILURE,
+              s"Deployment ${deploymentId.unapply} (${response.deploymentName.unapply}) failed. Central's errors:\n${SonatypeCentralClient.describeErrors(json)}"
+            )
           )
-          Right(false)
         } else if (response.deploymentState != PUBLISHED && shouldDeployBePublished) {
           Thread.sleep(5000L)
-          didDeploySucceed(deploymentId, shouldDeployBePublished)
+          awaitDeployment(deploymentId, shouldDeployBePublished)
         } else {
           logger.info(
             s"Deployment succeeded for deployment id: ${deploymentId.unapply}. Current deployment state: ${response.deploymentState.unapply}"
           )
-          Right(true)
+          Right(())
         }
     } yield finalRes
 
@@ -125,5 +137,22 @@ object SonatypeCentralClient {
         backend,
         Some(LoggingOptions(logRequestBody = Some(true), logResponseBody = Some(true)))
       )
-    } yield new SonatypeCentralClient(client, readTimeoutMillis, logger)
+    } yield new SonatypeCentralClient(client, backend, readTimeoutMillis, logger)
+
+  /** Central's `errors`: for each component (a purl), the messages it failed validation with. */
+  def describeErrors(status: ujson.Value): String =
+    status.obj.get("errors") match {
+      case None                         => "  (the status response has no errors field)"
+      case Some(ujson.Obj(byComponent)) =>
+        byComponent
+          .map { case (component, messages) =>
+            val lines = messages match {
+              case ujson.Arr(ms) => ms.map(m => s"    - ${m match { case ujson.Str(str) => str; case other => ujson.write(other) }}")
+              case other         => List(s"    - ${ujson.write(other)}")
+            }
+            (s"  $component" +: lines).mkString("\n")
+          }
+          .mkString("\n")
+      case Some(other) => s"  ${ujson.write(other)}"
+    }
 }

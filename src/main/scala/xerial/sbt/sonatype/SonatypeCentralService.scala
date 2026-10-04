@@ -1,6 +1,6 @@
 package bleep.plugin.sonatype.sonatype
 
-import bleep.plugin.sonatype.sonatype.SonatypeException.{BUNDLE_ZIP_ERROR, STAGE_FAILURE}
+import bleep.plugin.sonatype.sonatype.SonatypeException.BUNDLE_ZIP_ERROR
 import bleep.plugin.sonatype.sonatype.utils.Extensions.*
 import com.lumidion.sonatype.central.client.core.{DeploymentName, PublishingType}
 import ryddig.Logger
@@ -25,15 +25,7 @@ class SonatypeCentralService(client: SonatypeCentralClient, logger: Logger) {
     }
     deploymentId <- client.uploadBundle(zipFile, deploymentName, Some(publishingType))
     _ = logger.info(s"Checking if deployment succeeded for deployment id: ${deploymentId.unapply}...")
-    didDeploySucceed <- client.didDeploySucceed(deploymentId, publishingType == PublishingType.AUTOMATIC)
-    _ <- Either.cond(
-      didDeploySucceed,
-      (),
-      SonatypeException(
-        STAGE_FAILURE,
-        s"Deployment failed. Deployment id: ${deploymentId.unapply}. Deployment name: ${deploymentName.unapply}"
-      )
-    )
+    _ <- client.awaitDeployment(deploymentId, publishingType == PublishingType.AUTOMATIC)
   } yield ()
 
   private def zipDirectory(localBundlePath: File, bundleZipDirPath: Path): File = {
